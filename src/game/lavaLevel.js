@@ -1,4 +1,7 @@
 export function createLavaLevel({ THREE, world }) {
+  const root = new THREE.Group()
+  world.add(root)
+
   const lavaSurfaceY = 0
   const platformColor = new THREE.Color(0x6f7888)
   const platformEdgeColor = new THREE.Color(0x858ea0)
@@ -14,7 +17,7 @@ export function createLavaLevel({ THREE, world }) {
   lava.rotation.x = -Math.PI / 2
   lava.position.y = lavaSurfaceY
   lava.receiveShadow = true
-  world.add(lava)
+  root.add(lava)
 
   const lavaGlow = new THREE.Mesh(
     new THREE.PlaneGeometry(124, 124, 1, 1),
@@ -28,7 +31,7 @@ export function createLavaLevel({ THREE, world }) {
   )
   lavaGlow.rotation.x = -Math.PI / 2
   lavaGlow.position.y = lavaSurfaceY + 0.012
-  world.add(lavaGlow)
+  root.add(lavaGlow)
 
   const ringWall = new THREE.Mesh(
     new THREE.TorusGeometry(30.4, 1.2, 14, 88),
@@ -44,7 +47,7 @@ export function createLavaLevel({ THREE, world }) {
   ringWall.rotation.x = Math.PI / 2
   ringWall.receiveShadow = true
   ringWall.castShadow = true
-  world.add(ringWall)
+  root.add(ringWall)
 
   const lavaLights = []
   const lightPositions = [
@@ -58,7 +61,7 @@ export function createLavaLevel({ THREE, world }) {
     const light = new THREE.PointLight(0xff6f2d, 1.9, 20, 2)
     light.position.set(x, y, z)
     light.castShadow = false
-    world.add(light)
+    root.add(light)
     lavaLights.push({
       light,
       baseIntensity: THREE.MathUtils.randFloat(1.4, 2.4),
@@ -178,7 +181,7 @@ export function createLavaLevel({ THREE, world }) {
     mesh.add(topPlate)
 
     mesh.position.copy(spec.base)
-    world.add(mesh)
+    root.add(mesh)
 
     const collider = {
       minX: 0,
@@ -338,6 +341,10 @@ export function createLavaLevel({ THREE, world }) {
   }
 
   function update() {
+    if (!root.visible) {
+      return
+    }
+
     const nowSeconds = performance.now() * 0.001
 
     for (const platform of platforms) {
@@ -373,11 +380,17 @@ export function createLavaLevel({ THREE, world }) {
 
   update()
 
+  function setActive(active) {
+    root.visible = active
+  }
+
   return {
     lavaSurfaceY,
-    platformColliders,
+    colliders: platformColliders,
+    setActive,
     update,
     getPlayerSpawnPoint,
+    getPlayerLookTarget: () => new THREE.Vector3(0, 2.3, 0),
     getEnemySpawnPoint,
     isPlayerTouchingLava,
     applyPlatformCarryToPlayer,

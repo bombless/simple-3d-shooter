@@ -2,6 +2,7 @@ import './style.css'
 import * as THREE from 'three'
 import { createAudioController } from './game/audio'
 import { createDayNightController } from './game/dayNight'
+import { createGrassLevel } from './game/grassLevel'
 import { createLavaLevel } from './game/lavaLevel'
 import { processPlayerInput } from './game/playerMovement'
 import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
@@ -10,11 +11,16 @@ import { updateDamageOverlay, updateHud } from './game/ui'
 import { createFlashlightCookieTexture, addCameraShake, applyCameraShake } from './game/utils'
 import * as CONSTANTS from './game/constants'
 
+const LEVELS = [
+  { id: 'grass', label: 'FIELD', name: '第一关：荒野防线' },
+  { id: 'lava', label: 'LAVA', name: '第二关：熔岩平台' },
+]
+
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 小心岩浆 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 第一关胜利可进第二关 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <div id="damage-overlay"></div>
@@ -26,8 +32,8 @@ app.innerHTML = `
   </div>
   <div id="message" class="visible">
     <h1>Cube Strike</h1>
-    <p>熔岩平台生存战</p>
-    <p class="sub">点击屏幕开始，在移动平台上击败 20 个敌人或存活 90 秒。掉进岩浆会持续掉血。</p>
+    <p>双关卡生存射击</p>
+    <p class="sub">第一关：荒野防线。胜利后可进入第二关熔岩平台，岩浆会照亮附近并造成持续伤害。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -119,12 +125,9 @@ scene.add(moonOrb)
 
 const world = new THREE.Group()
 scene.add(world)
-const staticColliders = []
 
-const lavaLevel = createLavaLevel({
-  THREE,
-  world,
-})
+const grassLevel = createGrassLevel({ THREE, world })
+const lavaLevel = createLavaLevel({ THREE, world })
 
 const pointer = new THREE.Vector2(0, 0)
 const raycaster = new THREE.Raycaster()
@@ -158,14 +161,36 @@ const state = {
   yaw: 0,
   pitch: 0,
   lavaDamageAccumulator: 0,
-  levelLabel: 'LAVA',
+  currentLevelIndex: 0,
+  levelLabel: LEVELS[0].label,
 }
 
 const enemies = []
 const bloodBursts = []
 
+function getActiveLevelMeta() {
+  return LEVELS[state.currentLevelIndex]
+}
+
+function getActiveLevelSystem() {
+  return state.currentLevelIndex === 0 ? grassLevel : lavaLevel
+}
+
+function hasNextLevel() {
+  return state.currentLevelIndex < LEVELS.length - 1
+}
+
+function setLevel(index) {
+  state.currentLevelIndex = THREE.MathUtils.clamp(index, 0, LEVELS.length - 1)
+  grassLevel.setActive(state.currentLevelIndex === 0)
+  lavaLevel.setActive(state.currentLevelIndex === 1)
+  state.levelLabel = getActiveLevelMeta().label
+  state.lavaDamageAccumulator = 0
+}
+
 function orientPlayerViewForSpawn() {
-  const lookTarget = new THREE.Vector3(0, 1.8, 0)
+  const activeLevel = getActiveLevelSystem()
+  const lookTarget = activeLevel.getPlayerLookTarget()
   camera.position.copy(state.playerPosition)
   camera.lookAt(lookTarget)
   state.yaw = camera.rotation.y
@@ -193,16 +218,24 @@ function applyPlayerDamage(amount) {
   }
 }
 
-function spawnEnemyOnPlatform() {
-  const spawnData = lavaLevel.getEnemySpawnPoint(CONSTANTS.ENEMY_BASE_HEIGHT)
+function spawnEnemyForCurrentLevel() {
+  const activeLevel = getActiveLevelSystem()
+  const spawnData = activeLevel.getEnemySpawnPoint(CONSTANTS.ENEMY_BASE_HEIGHT)
   const enemy = spawnEnemy(world, enemies, {
     spawnPosition: spawnData.position,
   })
-  enemy.platformIndex = spawnData.platformIndex
-  lavaLevel.constrainEnemyToPlatform(enemy, CONSTANTS.ENEMY_BASE_HEIGHT)
+
+  if (state.currentLevelIndex === 1) {
+    enemy.platformIndex = spawnData.platformIndex
+    lavaLevel.constrainEnemyToPlatform(enemy, CONSTANTS.ENEMY_BASE_HEIGHT)
+  }
 }
 
 function keepEnemiesOnPlatforms() {
+  if (state.currentLevelIndex !== 1) {
+    return
+  }
+
   for (const enemy of enemies) {
     lavaLevel.constrainEnemyToPlatform(enemy, CONSTANTS.ENEMY_BASE_HEIGHT)
   }
@@ -294,12 +327,13 @@ function resetRound() {
   flashlightState.flickerMultiplier = 1
   flashlightState.lastUpdateMs = performance.now()
 
-  lavaLevel.update()
-  state.playerPosition.copy(lavaLevel.getPlayerSpawnPoint(CONSTANTS.PLAYER_HEIGHT))
+  const activeLevel = getActiveLevelSystem()
+  activeLevel.update()
+  state.playerPosition.copy(activeLevel.getPlayerSpawnPoint(CONSTANTS.PLAYER_HEIGHT))
   orientPlayerViewForSpawn()
 
   for (let i = 0; i < 6; i += 1) {
-    spawnEnemyOnPlatform()
+    spawnEnemyForCurrentLevel()
   }
 
   updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
@@ -333,6 +367,22 @@ function beginRound() {
   }
 }
 
+function switchToNextLevel() {
+  if (!hasNextLevel()) {
+    return
+  }
+
+  setLevel(state.currentLevelIndex + 1)
+  resetRound()
+  beginRound()
+}
+
+function backToFirstLevelAndStart() {
+  setLevel(0)
+  resetRound()
+  beginRound()
+}
+
 function endRound(victory, reason) {
   if (state.ended) {
     return
@@ -346,18 +396,36 @@ function endRound(victory, reason) {
     playVictorySfx()
   }
 
+  const canAdvance = victory && hasNextLevel()
+  const canBackToFirst = state.currentLevelIndex > 0
+
   messageEl.classList.add('visible')
   messageEl.innerHTML = `
     <h1>${victory ? '胜利!' : '失败'}</h1>
     <p>${reason}</p>
-    <p class="sub">最终得分：${state.score}</p>
-    <button id="restart-btn">再来一局 (R)</button>
+    <p class="sub">当前关卡：${getActiveLevelMeta().name} | 最终得分：${state.score}</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+      <button id="restart-btn">重开本关 (R)</button>
+      ${canAdvance ? '<button id="next-level-btn">进入下一关</button>' : ''}
+      ${canBackToFirst ? '<button id="back-level-btn">返回第一关</button>' : ''}
+    </div>
   `
+
   const restartBtn = document.querySelector('#restart-btn')
   restartBtn.addEventListener('click', () => {
     resetRound()
     beginRound()
   })
+
+  if (canAdvance) {
+    const nextBtn = document.querySelector('#next-level-btn')
+    nextBtn.addEventListener('click', switchToNextLevel)
+  }
+
+  if (canBackToFirst) {
+    const backBtn = document.querySelector('#back-level-btn')
+    backBtn.addEventListener('click', backToFirstLevelAndStart)
+  }
 }
 
 function handleShoot() {
@@ -398,14 +466,14 @@ function handleShoot() {
 }
 
 function processInput(delta) {
-  const activeColliders = staticColliders.concat(lavaLevel.platformColliders)
+  const activeLevel = getActiveLevelSystem()
   processPlayerInput({
     THREE,
     delta,
     camera,
     keys,
     state,
-    staticColliders: activeColliders,
+    staticColliders: activeLevel.colliders,
     constants: {
       moveSpeed: CONSTANTS.PLAYER_MOVE_SPEED,
       playerHeight: CONSTANTS.PLAYER_HEIGHT,
@@ -421,6 +489,10 @@ function processInput(delta) {
 }
 
 function updateLavaDamage(delta) {
+  if (state.currentLevelIndex !== 1) {
+    return
+  }
+
   if (lavaLevel.isPlayerTouchingLava(state.playerPosition, CONSTANTS.PLAYER_HEIGHT)) {
     state.lavaDamageAccumulator += delta
     while (state.lavaDamageAccumulator >= CONSTANTS.LAVA_DAMAGE_INTERVAL_SECONDS) {
@@ -437,7 +509,8 @@ function updateLavaDamage(delta) {
 }
 
 function updateRoundState(delta) {
-  lavaLevel.update()
+  const activeLevel = getActiveLevelSystem()
+  activeLevel.update()
 
   if (!state.running || state.ended) {
     return
@@ -455,12 +528,14 @@ function updateRoundState(delta) {
   state.spawnAccumulator += delta
   if (state.spawnAccumulator >= 1.4 && enemies.length < 14) {
     state.spawnAccumulator = 0
-    spawnEnemyOnPlatform()
+    spawnEnemyForCurrentLevel()
   }
 
-  lavaLevel.applyPlatformCarryToPlayer(state, CONSTANTS.PLAYER_HEIGHT)
-  for (const enemy of enemies) {
-    lavaLevel.applyPlatformCarryToEnemy(enemy)
+  if (state.currentLevelIndex === 1) {
+    lavaLevel.applyPlatformCarryToPlayer(state, CONSTANTS.PLAYER_HEIGHT)
+    for (const enemy of enemies) {
+      lavaLevel.applyPlatformCarryToEnemy(enemy)
+    }
   }
 
   processInput(delta)
@@ -547,7 +622,7 @@ document.addEventListener('pointerlockchange', () => {
     messageEl.classList.add('visible')
     messageEl.innerHTML = `
       <h1>已暂停</h1>
-      <p>点击按钮继续游戏</p>
+      <p>当前关卡：${getActiveLevelMeta().name}</p>
       <button id="resume-btn">继续</button>
     `
     const resumeBtn = document.querySelector('#resume-btn')
@@ -569,6 +644,7 @@ function animate() {
   requestAnimationFrame(animate)
 }
 
+setLevel(0)
 updateDayNightCycle()
 resetRound()
 animate()
