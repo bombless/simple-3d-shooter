@@ -8,6 +8,7 @@ import { createLavaLevel } from './game/lavaLevel'
 import { createBleedLevel } from './game/bleedLevel'
 import { createShadowPillarLevel } from './game/shadowPillarLevel'
 import { createColorTrialLevel } from './game/colorTrialLevel'
+import { createSolarCycleLevel } from './game/solarCycleLevel'
 import { processPlayerInput } from './game/playerMovement'
 import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
 import { spawnBloodBurst, clearBloodBursts, updateBloodBursts } from './game/blood'
@@ -17,18 +18,21 @@ import { createFlashlightCookieTexture, addCameraShake, applyCameraShake } from 
 import * as CONSTANTS from './game/constants'
 
 const LEVELS = [
-  { id: 'grass', label: 'FIELD', name: '第一关：荒野防线' },
-  { id: 'lava', label: 'LAVA', name: '第二关：熔岩平台' },
-  { id: 'bleed', label: 'BLEED', name: '第三关：失血平原' },
-  { id: 'shadow', label: 'SHADOW', name: '第四关：烈日柱阵' },
-  { id: 'color', label: 'CHROMA', name: '第五关：色相试炼' },
+  { id: 'grass', label: 'FIELD', name: '第一关：荒野防线', roundTime: 90 },
+  { id: 'lava', label: 'LAVA', name: '第二关：熔岩平台', roundTime: 90 },
+  { id: 'bleed', label: 'BLEED', name: '第三关：失血平原', roundTime: 90 },
+  { id: 'shadow', label: 'SHADOW', name: '第四关：烈日柱阵', roundTime: 90 },
+  { id: 'color', label: 'CHROMA', name: '第五关：色相试炼', roundTime: 90 },
+  { id: 'eclipse', label: 'ECLIPSE', name: '第六关：日蚀回响', roundTime: 180 },
+  { id: 'rift', label: 'RIFT', name: '第七关：裂隙潮汐', roundTime: 180 },
+  { id: 'prism', label: 'PRISM', name: '第八关：棱镜灯塔', roundTime: 180 },
 ]
 
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 五关生存挑战 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 八关生存挑战 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <button id="mobile-fullscreen-btn" type="button" aria-label="切换全屏">全屏</button>
@@ -42,8 +46,8 @@ app.innerHTML = `
   </div>
   <div id="message" class="visible">
     <h1>Beaconfall</h1>
-    <p>五关生存射击</p>
-    <p class="sub">五关挑战：荒野、熔岩、失血平原、烈日柱阵、色相试炼。每一关都有不同生存机制。</p>
+    <p>八关生存射击</p>
+    <p class="sub">八关挑战：荒野、熔岩、失血平原、烈日柱阵、色相试炼、日蚀回响、裂隙潮汐、棱镜灯塔。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -58,14 +62,22 @@ const hpBarLabelEl = document.querySelector('#hp-bar-label')
 const hpBarFillEl = document.querySelector('#hp-bar-fill')
 const damageOverlayEl = document.querySelector('#damage-overlay')
 
-const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 五关生存挑战 | Esc 暂停 | R 重开'
-const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 五关生存挑战 | 建议横屏并开启全屏'
+const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 八关生存挑战 | Esc 暂停 | R 重开'
+const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 八关生存挑战 | 建议横屏并开启全屏'
 const MOBILE_LOOK_SENSITIVITY = 0.0038
 const MOBILE_TAP_MOVE_THRESHOLD = 10
 const MOBILE_TAP_MAX_DURATION_MS = 240
 const MOBILE_DOUBLE_TAP_WINDOW_MS = 260
 const MOBILE_DOUBLE_TAP_RANGE_PX = 42
 const MOBILE_COMBO_IDLE_EXIT_MS = 500
+const SOLAR_DUSK_TRIGGER_DAY_FACTOR = 0.58
+const SOLAR_RING_PICKUP_RADIUS = 1.36
+const SOLAR_ROUNDS_TARGET_COLORS = 3
+const SOLAR_DARK_TIDE_DAMAGE_PER_SECOND = 4.2
+const SOLAR_DARK_TIDE_DAMAGE_INTERVAL_SECONDS = 0.25
+const SOLAR_SPAWN_SCALE_DECAY_PER_CYCLE = 0.92
+const SOLAR_SPAWN_SCALE_MIN = 0.6
+const SOLAR_ENEMY_CAP_BONUS_MAX = 6
 const DAY_BEACON_CRYSTALIZE_INTERVAL_SECONDS = 0.55
 const DAY_BEACON_CRYSTAL_DEATH_DELAY_SECONDS = 1.05
 const COLOR_TRIAL_PROFILES = [
@@ -204,6 +216,57 @@ const colorTrialLevel = createColorTrialLevel({
     colorProfiles: COLOR_TRIAL_PROFILES,
   },
 })
+const eclipseLevel = createSolarCycleLevel({
+  THREE,
+  world,
+  config: {
+    floorColor: 0x737f95,
+    obstacleColor: 0x4e5a70,
+    obstacleCount: 21,
+    lighthousePosition: new THREE.Vector3(25.8, 0, 24.6),
+    lighthouseTriggerRadius: 2.9,
+    playerSpawn: new THREE.Vector3(0, 0, 12.4),
+    playerLookTarget: new THREE.Vector3(5.8, 2, -2.2),
+    enemySpawnMinRadius: 14,
+    enemySpawnMaxRadius: 30,
+  },
+})
+const riftLevel = createSolarCycleLevel({
+  THREE,
+  world,
+  config: {
+    floorColor: 0x6c7288,
+    obstacleColor: 0x434d63,
+    obstacleCount: 24,
+    lighthousePosition: new THREE.Vector3(-24.8, 0, 23.6),
+    lighthouseTriggerRadius: 3,
+    playerSpawn: new THREE.Vector3(0, 0, 11.8),
+    playerLookTarget: new THREE.Vector3(-6, 2, -3),
+    enemySpawnMinRadius: 13,
+    enemySpawnMaxRadius: 31,
+    driftingImprints: true,
+    includeDarkTides: true,
+  },
+})
+const prismLevel = createSolarCycleLevel({
+  THREE,
+  world,
+  config: {
+    floorColor: 0x7a7f8f,
+    obstacleColor: 0x54596b,
+    obstacleCount: 26,
+    lighthousePosition: new THREE.Vector3(0, 0, -25.4),
+    lighthouseTriggerRadius: 3.2,
+    playerSpawn: new THREE.Vector3(0, 0, 12.6),
+    playerLookTarget: new THREE.Vector3(0, 2, -8.2),
+    enemySpawnMinRadius: 12,
+    enemySpawnMaxRadius: 31,
+    driftingImprints: true,
+    includeDarkTides: true,
+    includeColorPillars: true,
+    colorProfiles: COLOR_TRIAL_PROFILES,
+  },
+})
 const peaceBoundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
 const grassPeaceSystem = createPeaceSystem({
   THREE,
@@ -250,8 +313,8 @@ const state = {
   hp: CONSTANTS.PLAYER_MAX_HP,
   score: 0,
   enemyGoal: 20,
-  roundTime: 90,
-  timeLeft: 90,
+  roundTime: LEVELS[0].roundTime,
+  timeLeft: LEVELS[0].roundTime,
   runStartedMs: 0,
   elapsedBeforeRun: 0,
   spawnAccumulator: 0,
@@ -273,6 +336,7 @@ const state = {
   colorCurseDamageAccumulator: 0,
   dayBeaconRitualActive: false,
   dayBeaconRitualAccumulator: 0,
+  levelObjectiveText: '',
   lastTrailPosition: new THREE.Vector3(0, CONSTANTS.PLAYER_HEIGHT, 12),
   currentLevelIndex: 0,
   levelLabel: LEVELS[0].label,
@@ -287,6 +351,21 @@ const hitRings = []
 const bleedTrails = []
 const healthPacks = []
 const pickupBubbles = []
+
+const solarCycleState = {
+  cycleCount: 0,
+  currentSunColorKey: null,
+  targetColors: [],
+  completedColors: new Set(),
+  ringSpawnedColors: new Set(),
+  lighthouseArmed: false,
+  ritualTriggered: false,
+  prismCrystalKills: 0,
+  lastDayFactor: dayNightState.dayFactor,
+  enemySpawnScale: 1,
+  enemyCapBonus: 0,
+  darkTideDamageAccumulator: 0,
+}
 
 const BLEED_TRAIL_GEOMETRY = new THREE.CircleGeometry(0.3, 18)
 const HEALTH_PACK_CORE_GEOMETRY = new THREE.SphereGeometry(0.3, 14, 12)
@@ -424,7 +503,17 @@ function getActiveLevelSystem() {
   if (state.currentLevelIndex === 1) return lavaLevel
   if (state.currentLevelIndex === 2) return bleedLevel
   if (state.currentLevelIndex === 3) return shadowLevel
-  return colorTrialLevel
+  if (state.currentLevelIndex === 4) return colorTrialLevel
+  if (state.currentLevelIndex === 5) return eclipseLevel
+  if (state.currentLevelIndex === 6) return riftLevel
+  return prismLevel
+}
+
+function getActiveSolarLevelSystem() {
+  if (state.currentLevelIndex === 5) return eclipseLevel
+  if (state.currentLevelIndex === 6) return riftLevel
+  if (state.currentLevelIndex === 7) return prismLevel
+  return null
 }
 
 function getActivePeaceSystem() {
@@ -444,7 +533,23 @@ function hasNextLevel() {
 }
 
 function isFixedDayLevel() {
-  return state.currentLevelIndex >= 2
+  return state.currentLevelIndex >= 2 && state.currentLevelIndex <= 4
+}
+
+function isSolarCycleLevel() {
+  return state.currentLevelIndex >= 5
+}
+
+function isSolarRiftLevel() {
+  return state.currentLevelIndex === 6
+}
+
+function isPrismFinalLevel() {
+  return state.currentLevelIndex === 7
+}
+
+function isColorCurseLevel() {
+  return state.currentLevelIndex === 4 || state.currentLevelIndex === 7
 }
 
 function getFixedSunPosition() {
@@ -567,9 +672,10 @@ function updatePlayerColorStatusVisual(delta = 0) {
   const now = performance.now() * 0.001
   const pulse = 1 + Math.sin(now * 4.6) * 0.08
 
-  playerStatusRing.visible = state.currentLevelIndex === 4
-  playerStatusHalo.visible = state.currentLevelIndex === 4
-  playerStatusLight.visible = state.currentLevelIndex === 4
+  const statusVisible = isColorCurseLevel()
+  playerStatusRing.visible = statusVisible
+  playerStatusHalo.visible = statusVisible
+  playerStatusLight.visible = statusVisible
 
   playerStatusRing.position.set(state.playerPosition.x, 0.05, state.playerPosition.z)
   playerStatusHalo.position.set(state.playerPosition.x, 0.04, state.playerPosition.z)
@@ -597,7 +703,7 @@ function clearColorCurseState() {
 }
 
 function applyColorCurseFromEnemy(enemy) {
-  if (state.currentLevelIndex !== 4 || !enemy || !enemy.colorKey) {
+  if (!isColorCurseLevel() || !enemy || !enemy.colorKey) {
     return
   }
 
@@ -609,6 +715,275 @@ function applyColorCurseFromEnemy(enemy) {
   state.colorCurseKey = profile.key
   state.colorCurseLabel = profile.label
   state.colorCurseDamageAccumulator = 0
+}
+
+function getColorProfileByKey(colorKey) {
+  return COLOR_TRIAL_PROFILE_BY_KEY.get(colorKey) || null
+}
+
+function pickRandomSolarColorKey() {
+  return COLOR_TRIAL_PROFILES[THREE.MathUtils.randInt(0, COLOR_TRIAL_PROFILES.length - 1)].key
+}
+
+function updateSolarCycleDifficulty() {
+  const cycles = solarCycleState.cycleCount
+  solarCycleState.enemySpawnScale = Math.max(
+    SOLAR_SPAWN_SCALE_MIN,
+    SOLAR_SPAWN_SCALE_DECAY_PER_CYCLE ** cycles
+  )
+  solarCycleState.enemyCapBonus = Math.min(SOLAR_ENEMY_CAP_BONUS_MAX, cycles)
+}
+
+function updateSolarObjectiveText() {
+  if (!isSolarCycleLevel()) {
+    state.levelObjectiveText = ''
+    return
+  }
+
+  const currentProfile = getColorProfileByKey(solarCycleState.currentSunColorKey)
+  const currentSunLabel = currentProfile ? currentProfile.label : '--'
+  const targetLabel = solarCycleState.targetColors
+    .map((colorKey) => getColorProfileByKey(colorKey)?.label || '?')
+    .join('/')
+  const doneLabel = Array.from(solarCycleState.completedColors)
+    .map((colorKey) => getColorProfileByKey(colorKey)?.label || '?')
+    .join('/')
+
+  if (isPrismFinalLevel() && solarCycleState.ritualTriggered) {
+    state.levelObjectiveText = ` | GOAL: 净化进行中 ${solarCycleState.prismCrystalKills}/${state.enemyGoal}`
+    return
+  }
+
+  if (solarCycleState.lighthouseArmed) {
+    if (state.currentLevelIndex === 6) {
+      state.levelObjectiveText = ' | GOAL: 前往灯塔触发净化'
+      return
+    }
+    state.levelObjectiveText = ' | GOAL: 前往灯塔撤离'
+    return
+  }
+
+  state.levelObjectiveText = ` | SUN: ${currentSunLabel} | CYCLE: ${solarCycleState.cycleCount} | TARGET: ${
+    targetLabel || '--'
+  } | DONE: ${doneLabel || '--'}`
+}
+
+function resetSolarCycleState() {
+  solarCycleState.cycleCount = 0
+  solarCycleState.currentSunColorKey = pickRandomSolarColorKey()
+  solarCycleState.targetColors = []
+  solarCycleState.completedColors.clear()
+  solarCycleState.ringSpawnedColors.clear()
+  solarCycleState.lighthouseArmed = false
+  solarCycleState.ritualTriggered = false
+  solarCycleState.prismCrystalKills = 0
+  solarCycleState.lastDayFactor = dayNightState.dayFactor
+  solarCycleState.enemySpawnScale = 1
+  solarCycleState.enemyCapBonus = 0
+  solarCycleState.darkTideDamageAccumulator = 0
+  const activeSolarLevel = getActiveSolarLevelSystem()
+  if (activeSolarLevel) {
+    activeSolarLevel.clearObjectiveArtifacts()
+    activeSolarLevel.setLighthouseArmed(false)
+  }
+  updateSolarObjectiveText()
+}
+
+function applySolarSunTint() {
+  if (!isSolarCycleLevel()) {
+    return
+  }
+
+  const profile = getColorProfileByKey(solarCycleState.currentSunColorKey)
+  if (!profile) {
+    return
+  }
+
+  const tintColor = new THREE.Color(profile.pillarColor)
+  const tintStrength = THREE.MathUtils.lerp(0.24, 0.7, dayNightState.dayFactor)
+  sunOrbMaterial.color.copy(CONSTANTS.SUN_DAY_COLOR).lerp(tintColor, tintStrength)
+  sunLight.color.copy(CONSTANTS.SUN_DAY_COLOR).lerp(tintColor, tintStrength * 0.78)
+}
+
+function handleSolarDuskTransition() {
+  const activeSolarLevel = getActiveSolarLevelSystem()
+  if (!activeSolarLevel) {
+    return
+  }
+
+  const currentColorKey = solarCycleState.currentSunColorKey || pickRandomSolarColorKey()
+  const currentProfile = getColorProfileByKey(currentColorKey)
+  const sunDirection = new THREE.Vector3().subVectors(sunLightTarget.position, sunLight.position).normalize()
+
+  solarCycleState.cycleCount += 1
+  if (
+    currentProfile &&
+    !solarCycleState.targetColors.includes(currentColorKey) &&
+    solarCycleState.targetColors.length < SOLAR_ROUNDS_TARGET_COLORS
+  ) {
+    solarCycleState.targetColors.push(currentColorKey)
+    activeSolarLevel.spawnShadowImprints(currentColorKey, sunDirection, currentProfile.pillarColor)
+  }
+  updateSolarCycleDifficulty()
+
+  solarCycleState.currentSunColorKey = pickRandomSolarColorKey()
+  updateSolarObjectiveText()
+}
+
+function maybeSpawnSolarObjectiveRing(enemy) {
+  if (!isSolarCycleLevel() || !enemy || !enemy.colorKey) {
+    return
+  }
+
+  if (solarCycleState.targetColors.length < SOLAR_ROUNDS_TARGET_COLORS) {
+    return
+  }
+
+  if (!solarCycleState.targetColors.includes(enemy.colorKey)) {
+    return
+  }
+  if (solarCycleState.completedColors.has(enemy.colorKey)) {
+    return
+  }
+  if (solarCycleState.ringSpawnedColors.has(enemy.colorKey)) {
+    return
+  }
+
+  const activeSolarLevel = getActiveSolarLevelSystem()
+  if (!activeSolarLevel) {
+    return
+  }
+  const spawnPoint = activeSolarLevel.getNearestImprintSpawn(enemy.colorKey, enemy.mesh.position)
+  if (!spawnPoint) {
+    return
+  }
+
+  const profile = getColorProfileByKey(enemy.colorKey)
+  if (!profile) {
+    return
+  }
+  activeSolarLevel.markImprintUsed(enemy.colorKey, spawnPoint.id)
+  activeSolarLevel.spawnObjectiveRing(enemy.colorKey, profile.pillarColor, spawnPoint.position)
+  solarCycleState.ringSpawnedColors.add(enemy.colorKey)
+  updateSolarObjectiveText()
+}
+
+function registerEnemyDefeat(enemy, reason) {
+  maybeSpawnSolarObjectiveRing(enemy)
+  state.score += 1
+
+  if (isPrismFinalLevel() && solarCycleState.ritualTriggered && reason === 'ritual') {
+    solarCycleState.prismCrystalKills += 1
+  }
+
+  if (isSolarCycleLevel()) {
+    updateSolarObjectiveText()
+  }
+  updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
+
+  if (
+    isPrismFinalLevel() &&
+    solarCycleState.ritualTriggered &&
+    solarCycleState.prismCrystalKills >= state.enemyGoal
+  ) {
+    endRound(true, `棱镜净化完成，结晶击杀达到 ${state.enemyGoal}`)
+    return
+  }
+
+  if (isSolarCycleLevel()) {
+    return
+  }
+
+  if (reason === 'ritual') {
+    if (state.score >= state.enemyGoal) {
+      endRound(true, `信标净化完成，结晶敌人数量达到 ${state.enemyGoal}`)
+    }
+    return
+  }
+
+  if (state.score >= state.enemyGoal) {
+    endRound(true, `你击败了 ${state.enemyGoal} 个敌人`)
+  }
+}
+
+function updateSolarCycleObjective(delta) {
+  if (!isSolarCycleLevel()) {
+    return
+  }
+
+  if (
+    solarCycleState.lastDayFactor >= SOLAR_DUSK_TRIGGER_DAY_FACTOR &&
+    dayNightState.dayFactor < SOLAR_DUSK_TRIGGER_DAY_FACTOR
+  ) {
+    handleSolarDuskTransition()
+  }
+  solarCycleState.lastDayFactor = dayNightState.dayFactor
+
+  const activeSolarLevel = getActiveSolarLevelSystem()
+  if (!activeSolarLevel) {
+    return
+  }
+
+  if (isSolarRiftLevel() && activeSolarLevel.isPlayerInDarkTide(state.playerPosition)) {
+    solarCycleState.darkTideDamageAccumulator += delta
+    while (solarCycleState.darkTideDamageAccumulator >= SOLAR_DARK_TIDE_DAMAGE_INTERVAL_SECONDS) {
+      solarCycleState.darkTideDamageAccumulator -= SOLAR_DARK_TIDE_DAMAGE_INTERVAL_SECONDS
+      applyPlayerDamage(SOLAR_DARK_TIDE_DAMAGE_PER_SECOND * SOLAR_DARK_TIDE_DAMAGE_INTERVAL_SECONDS, {
+        silent: true,
+        noShake: true,
+      })
+      if (state.ended) {
+        return
+      }
+    }
+  } else {
+    solarCycleState.darkTideDamageAccumulator = 0
+  }
+
+  const collectedRingColor = activeSolarLevel.collectObjectiveRing(
+    state.playerPosition,
+    SOLAR_RING_PICKUP_RADIUS
+  )
+  if (collectedRingColor) {
+    solarCycleState.completedColors.add(collectedRingColor)
+    solarCycleState.ringSpawnedColors.delete(collectedRingColor)
+  }
+
+  if (
+    !solarCycleState.lighthouseArmed &&
+    solarCycleState.completedColors.size >= SOLAR_ROUNDS_TARGET_COLORS
+  ) {
+    solarCycleState.lighthouseArmed = true
+    activeSolarLevel.setLighthouseArmed(true)
+  }
+
+  if (!solarCycleState.lighthouseArmed || !activeSolarLevel.isPlayerInLighthouseZone(state.playerPosition)) {
+    updateSolarObjectiveText()
+    return
+  }
+
+  if (state.currentLevelIndex === 5) {
+    endRound(true, '三色圆环已收集，成功抵达灯塔')
+    return
+  }
+
+  if (state.currentLevelIndex === 6) {
+    if (!solarCycleState.ritualTriggered) {
+      solarCycleState.ritualTriggered = true
+      updateSolarObjectiveText()
+      endRound(true, '裂隙信标已激活，净化仪式完成')
+    }
+    return
+  }
+
+  if (isPrismFinalLevel() && !solarCycleState.ritualTriggered) {
+    solarCycleState.ritualTriggered = true
+    state.dayBeaconRitualActive = true
+    state.dayBeaconRitualAccumulator = 0
+    updateSolarObjectiveText()
+  }
+
+  updateSolarObjectiveText()
 }
 
 function resetDayBeaconRitualState() {
@@ -626,6 +1001,9 @@ function getActiveDayBeaconInfo() {
   }
   if (state.currentLevelIndex === 3) {
     return shadowLevel.getDayBeaconInfo()
+  }
+  if (isPrismFinalLevel()) {
+    return prismLevel.getDayBeaconInfo()
   }
   return null
 }
@@ -749,7 +1127,8 @@ function updateDayBeaconRitual(delta) {
     return
   }
 
-  if (!state.dayBeaconRitualActive) {
+  const shouldAutoTriggerByZone = state.currentLevelIndex === 2 || state.currentLevelIndex === 3
+  if (!state.dayBeaconRitualActive && shouldAutoTriggerByZone) {
     const dx = state.playerPosition.x - beaconInfo.position.x
     const dz = state.playerPosition.z - beaconInfo.position.z
     if (dx * dx + dz * dz <= beaconInfo.triggerRadius ** 2) {
@@ -790,9 +1169,8 @@ function updateDayBeaconRitual(delta) {
 
     enemies.splice(index, 1)
     removeEnemy(world, enemy)
-    state.score += 1
-    if (state.score >= state.enemyGoal) {
-      endRound(true, `信标净化完成，结晶敌人数量达到 ${state.enemyGoal}`)
+    registerEnemyDefeat(enemy, 'ritual')
+    if (state.ended) {
       return
     }
   }
@@ -806,11 +1184,16 @@ function setLevel(index) {
   bleedLevel.setActive(state.currentLevelIndex === 2)
   shadowLevel.setActive(state.currentLevelIndex === 3)
   colorTrialLevel.setActive(state.currentLevelIndex === 4)
+  eclipseLevel.setActive(state.currentLevelIndex === 5)
+  riftLevel.setActive(state.currentLevelIndex === 6)
+  prismLevel.setActive(state.currentLevelIndex === 7)
   grassPeaceSystem.setActive(state.currentLevelIndex === 0)
   lavaPeaceSystem.setActive(state.currentLevelIndex === 1)
   healthPackRoot.visible = state.currentLevelIndex === 2
   bleedTrailRoot.visible = state.currentLevelIndex === 2
   state.levelLabel = getActiveLevelMeta().label
+  state.roundTime = getActiveLevelMeta().roundTime
+  state.timeLeft = state.roundTime
   state.lavaDamageAccumulator = 0
   state.bleedDamageAccumulator = 0
   state.shadowSunDamageAccumulator = 0
@@ -825,6 +1208,7 @@ function setLevel(index) {
     resetBleedLevelObjects()
     clearColorCurseState()
     resetDayBeaconRitualState()
+    resetSolarCycleState()
   }
 
   if (!isFixedDayLevel()) {
@@ -1146,7 +1530,7 @@ function updateShadowSunDamage(delta) {
 }
 
 function updateColorTrialMechanics(delta) {
-  if (state.currentLevelIndex !== 4) {
+  if (!isColorCurseLevel()) {
     state.colorCurseDamageAccumulator = 0
     clearColorCurseState()
     return
@@ -1156,7 +1540,12 @@ function updateColorTrialMechanics(delta) {
     return
   }
 
-  const touchedColorKey = colorTrialLevel.getTouchedPillarColor(state.playerPosition)
+  let touchedColorKey = null
+  if (state.currentLevelIndex === 4) {
+    touchedColorKey = colorTrialLevel.getTouchedPillarColor(state.playerPosition)
+  } else {
+    touchedColorKey = prismLevel.getTouchedPillarColor(state.playerPosition)
+  }
   if (touchedColorKey && touchedColorKey === state.colorCurseKey) {
     state.hp = CONSTANTS.PLAYER_MAX_HP
     state.damageFlash = Math.max(0, state.damageFlash - 0.3)
@@ -1252,7 +1641,7 @@ function spawnEnemyForCurrentLevel() {
   const activeLevel = getActiveLevelSystem()
   const spawnData = activeLevel.getEnemySpawnPoint(CONSTANTS.ENEMY_BASE_HEIGHT)
   let colorProfile = null
-  if (state.currentLevelIndex === 4) {
+  if (state.currentLevelIndex === 4 || isSolarCycleLevel()) {
     colorProfile =
       COLOR_TRIAL_PROFILES[THREE.MathUtils.randInt(0, COLOR_TRIAL_PROFILES.length - 1)]
   }
@@ -1332,6 +1721,7 @@ function resetRound() {
   state.ended = false
   state.hp = CONSTANTS.PLAYER_MAX_HP
   state.score = 0
+  state.roundTime = getActiveLevelMeta().roundTime
   state.timeLeft = state.roundTime
   state.runStartedMs = 0
   state.elapsedBeforeRun = 0
@@ -1355,6 +1745,7 @@ function resetRound() {
   clearMobileComboMode()
   clearColorCurseState()
   resetDayBeaconRitualState()
+  resetSolarCycleState()
   flashlightState.battery = 1
   flashlightState.flickerTimeLeft = 0
   flashlightState.flickerMultiplier = 1
@@ -1504,16 +1895,14 @@ function handleShoot(clientX = null, clientY = null) {
 
   const [enemy] = enemies.splice(index, 1)
   removeEnemy(world, enemy)
-
-  state.score += 1
-  updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
-  if (state.score >= state.enemyGoal) {
-    endRound(true, `你击败了 ${state.enemyGoal} 个敌人`)
-  }
+  registerEnemyDefeat(enemy, 'shot')
 }
 
 function processInput(delta) {
   const activeLevel = getActiveLevelSystem()
+  const moveSpeedMultiplier = isSolarCycleLevel()
+    ? getActiveSolarLevelSystem()?.getPlayerSpeedMultiplier(state.playerPosition) || 1
+    : 1
   const movementInput = {
     KeyW: keys.KeyW || state.mobileForwardUntilLand,
     KeyA: keys.KeyA,
@@ -1531,7 +1920,7 @@ function processInput(delta) {
     state,
     staticColliders: activeLevel.colliders,
     constants: {
-      moveSpeed: CONSTANTS.PLAYER_MOVE_SPEED,
+      moveSpeed: CONSTANTS.PLAYER_MOVE_SPEED * moveSpeedMultiplier,
       playerHeight: CONSTANTS.PLAYER_HEIGHT,
       playerGravity: CONSTANTS.PLAYER_GRAVITY,
       playerJumpSpeed: CONSTANTS.PLAYER_JUMP_SPEED,
@@ -1577,15 +1966,23 @@ function updateRoundState(delta) {
   const runningSeconds = state.runStartedMs > 0 ? (performance.now() - state.runStartedMs) / 1000 : 0
   state.timeLeft = state.roundTime - (state.elapsedBeforeRun + runningSeconds)
   if (state.timeLeft <= 0) {
-    endRound(true, `时间到，成功存活 ${state.roundTime} 秒`)
+    if (isSolarCycleLevel()) {
+      endRound(false, `时间耗尽，未完成${getActiveLevelMeta().name}目标`)
+    } else {
+      endRound(true, `时间到，成功存活 ${state.roundTime} 秒`)
+    }
     return
   }
 
+  const spawnIntervalSeconds = isSolarCycleLevel()
+    ? enemySpawnIntervalSeconds * solarCycleState.enemySpawnScale
+    : enemySpawnIntervalSeconds
+  const enemyCap = isSolarCycleLevel()
+    ? CONSTANTS.ENEMY_MAX_ACTIVE_COUNT + solarCycleState.enemyCapBonus
+    : CONSTANTS.ENEMY_MAX_ACTIVE_COUNT
+
   state.spawnAccumulator += delta
-  if (
-    state.spawnAccumulator >= enemySpawnIntervalSeconds &&
-    enemies.length < CONSTANTS.ENEMY_MAX_ACTIVE_COUNT
-  ) {
+  if (state.spawnAccumulator >= spawnIntervalSeconds && enemies.length < enemyCap) {
     state.spawnAccumulator = 0
     spawnEnemyForCurrentLevel()
   }
@@ -1606,6 +2003,11 @@ function updateRoundState(delta) {
   const activePeaceSystem = getActivePeaceSystem()
   if (activePeaceSystem && activePeaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
     endRound(true, `你在${getActiveLevelMeta().name}抵达灯塔，成功和平撤离`)
+    return
+  }
+
+  updateSolarCycleObjective(delta)
+  if (state.ended) {
     return
   }
 
@@ -1890,6 +2292,9 @@ startBtn.addEventListener('click', beginRound)
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateDayNightCycle()
+  if (isSolarCycleLevel()) {
+    applySolarSunTint()
+  }
   if (isFixedDayLevel()) {
     applyFixedDayEnvironment()
   }
