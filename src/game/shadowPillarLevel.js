@@ -18,6 +18,7 @@ export function createShadowPillarLevel({ THREE, world }) {
 
   const colliders = []
   const pillars = []
+  const pillarBases = []
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(126, 126, 8, 8),
@@ -37,11 +38,11 @@ export function createShadowPillarLevel({ THREE, world }) {
     metalness: 0.05,
   })
 
-  for (let i = 0; i < 32; i += 1) {
-    const radius = THREE.MathUtils.randFloat(0.92, 1.7)
-    const height = THREE.MathUtils.randFloat(8.2, 14.6)
+  for (let i = 0; i < 28; i += 1) {
+    const radius = THREE.MathUtils.randFloat(1.8, 3.2)
+    const height = THREE.MathUtils.randFloat(9, 15.4)
     const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(radius, radius, height, 18, 1, false),
+      new THREE.CylinderGeometry(radius, radius, height, 22, 1, false),
       pillarMaterial
     )
 
@@ -52,16 +53,32 @@ export function createShadowPillarLevel({ THREE, world }) {
       x = THREE.MathUtils.randFloatSpread(54)
       z = THREE.MathUtils.randFloatSpread(54)
       attempts += 1
-    } while (
-      attempts < 60 &&
-      ((x * x + (z - 11) * (z - 11) < 40) || (x * x + z * z < 16))
-    )
+
+      let hasOverlap = false
+      for (const base of pillarBases) {
+        const dx = x - base.x
+        const dz = z - base.z
+        const minDistance = radius + base.radius + 1.15
+        if (dx * dx + dz * dz < minDistance * minDistance) {
+          hasOverlap = true
+          break
+        }
+      }
+      if (!hasOverlap) {
+        const nearSpawn = x * x + (z - 11) * (z - 11) < 54
+        const tooCentral = x * x + z * z < 24
+        if (!nearSpawn && !tooCentral) {
+          break
+        }
+      }
+    } while (attempts < 100)
 
     pillar.position.set(x, height / 2, z)
     pillar.castShadow = true
     pillar.receiveShadow = true
     root.add(pillar)
     pillars.push(pillar)
+    pillarBases.push({ x, z, radius })
     addCylinderCollider(colliders, x, height / 2, z, radius, height)
   }
 

@@ -83,7 +83,16 @@ scene.add(hemiLight)
 const sunLight = new THREE.DirectionalLight(0xffffff, 0.02)
 sunLight.position.set(10, 18, 7)
 sunLight.castShadow = true
-sunLight.shadow.mapSize.set(1024, 1024)
+sunLight.shadow.mapSize.set(2048, 2048)
+sunLight.shadow.camera.left = -84
+sunLight.shadow.camera.right = 84
+sunLight.shadow.camera.top = 84
+sunLight.shadow.camera.bottom = -84
+sunLight.shadow.camera.near = 0.5
+sunLight.shadow.camera.far = 240
+sunLight.shadow.bias = -0.00016
+sunLight.shadow.normalBias = 0.028
+sunLight.shadow.camera.updateProjectionMatrix()
 scene.add(sunLight)
 const sunLightTarget = new THREE.Object3D()
 scene.add(sunLightTarget)
