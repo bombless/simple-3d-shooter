@@ -50,6 +50,18 @@ npm run start
 npm run build
 ```
 
+### 部署到 GitHub Pages
+
+本仓库已包含自动部署工作流。你只需要：
+
+1. 在 GitHub 仓库页面进入 `Settings -> Pages`。
+2. 在 `Build and deployment` 中将 `Source` 设为 `GitHub Actions`。
+3. 推送到 `master` 分支后，Actions 会自动构建并部署。
+
+部署地址：
+
+- `https://bombless.github.io/simple-3d-shooter/`
+
 ---
 
 ## English
@@ -96,6 +108,18 @@ Default URL: `http://localhost:4173`
 npm run build
 ```
 
+### Deploy to GitHub Pages
+
+This repository now includes an automatic Pages workflow.
+
+1. Open `Settings -> Pages` in your GitHub repository.
+2. Under `Build and deployment`, set `Source` to `GitHub Actions`.
+3. Push to the `master` branch; GitHub Actions will build and deploy automatically.
+
+Deployment URL:
+
+- `https://bombless.github.io/simple-3d-shooter/`
+
 ---
 
 ## 日本語
@@ -141,3 +165,15 @@ npm run start
 ```bash
 npm run build
 ```
+
+### GitHub Pages へのデプロイ
+
+このリポジトリには自動デプロイ用ワークフローが含まれています。
+
+1. GitHub リポジトリの `Settings -> Pages` を開く。
+2. `Build and deployment` の `Source` を `GitHub Actions` に設定する。
+3. `master` ブランチへ push すると、自動でビルド・デプロイされる。
+
+公開 URL:
+
+- `https://bombless.github.io/simple-3d-shooter/`
