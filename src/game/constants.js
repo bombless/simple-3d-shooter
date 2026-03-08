@@ -36,6 +36,7 @@ export const LAVA_PEACE_ENEMY_SPAWN_SAFE_RADIUS = 10.8
 export const SHADOW_LEVEL_SUN_DIRECTION = new THREE.Vector3(-0.64, -1, -0.24).normalize()
 export const SHADOW_LEVEL_SUN_POSITION = new THREE.Vector3(58, 74, 24)
 export const BLEED_LEVEL_SUN_POSITION = new THREE.Vector3(42, 58, 20)
+export const COLOR_TRIAL_SUN_POSITION = new THREE.Vector3(48, 66, -10)
 
 // Player
 export const PLAYER_MAX_HP = 100
@@ -83,6 +84,10 @@ export const BLEED_TRAIL_MAX_COUNT = 180
 // Shadow level
 export const SHADOW_SUN_DAMAGE_PER_SECOND = 6.4
 export const SHADOW_SUN_DAMAGE_INTERVAL_SECONDS = 0.24
+
+// Color trial level
+export const COLOR_CURSE_DAMAGE_PER_SECOND = 8.2
+export const COLOR_CURSE_DAMAGE_INTERVAL_SECONDS = 0.2
 
 // Collision
 export const COLLISION_EPSILON = 0.001

@@ -7,6 +7,7 @@ import { createGrassLevel } from './game/grassLevel'
 import { createLavaLevel } from './game/lavaLevel'
 import { createBleedLevel } from './game/bleedLevel'
 import { createShadowPillarLevel } from './game/shadowPillarLevel'
+import { createColorTrialLevel } from './game/colorTrialLevel'
 import { processPlayerInput } from './game/playerMovement'
 import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
 import { spawnBloodBurst, clearBloodBursts, updateBloodBursts } from './game/blood'
@@ -20,13 +21,14 @@ const LEVELS = [
   { id: 'lava', label: 'LAVA', name: '第二关：熔岩平台' },
   { id: 'bleed', label: 'BLEED', name: '第三关：失血平原' },
   { id: 'shadow', label: 'SHADOW', name: '第四关：烈日柱阵' },
+  { id: 'color', label: 'CHROMA', name: '第五关：色相试炼' },
 ]
 
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 四关生存挑战 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 五关生存挑战 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <button id="mobile-fullscreen-btn" type="button" aria-label="切换全屏">全屏</button>
@@ -40,8 +42,8 @@ app.innerHTML = `
   </div>
   <div id="message" class="visible">
     <h1>Beaconfall</h1>
-    <p>四关生存射击</p>
-    <p class="sub">四关挑战：荒野、熔岩、失血平原、烈日柱阵。每一关都有不同生存机制。</p>
+    <p>五关生存射击</p>
+    <p class="sub">五关挑战：荒野、熔岩、失血平原、烈日柱阵、色相试炼。每一关都有不同生存机制。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -56,14 +58,23 @@ const hpBarLabelEl = document.querySelector('#hp-bar-label')
 const hpBarFillEl = document.querySelector('#hp-bar-fill')
 const damageOverlayEl = document.querySelector('#damage-overlay')
 
-const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 四关生存挑战 | Esc 暂停 | R 重开'
-const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 建议横屏并开启全屏'
+const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 五关生存挑战 | Esc 暂停 | R 重开'
+const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 五关生存挑战 | 建议横屏并开启全屏'
 const MOBILE_LOOK_SENSITIVITY = 0.0038
 const MOBILE_TAP_MOVE_THRESHOLD = 10
 const MOBILE_TAP_MAX_DURATION_MS = 240
 const MOBILE_DOUBLE_TAP_WINDOW_MS = 260
 const MOBILE_DOUBLE_TAP_RANGE_PX = 42
 const MOBILE_COMBO_IDLE_EXIT_MS = 500
+const COLOR_TRIAL_PROFILES = [
+  { key: 'blue', label: '蓝', enemyColor: 0x2f7cf5, enemyEmissive: 0x15398f, pillarColor: 0x2e7ef2 },
+  { key: 'red', label: '红', enemyColor: 0xe94343, enemyEmissive: 0x7a1f1f, pillarColor: 0xe34848 },
+  { key: 'green', label: '绿', enemyColor: 0x3ecf72, enemyEmissive: 0x1f6e3b, pillarColor: 0x42ca70 },
+  { key: 'black', label: '黑', enemyColor: 0x191b21, enemyEmissive: 0x383f56, pillarColor: 0x151821 },
+  { key: 'orange', label: '橙', enemyColor: 0xf18a2d, enemyEmissive: 0x85471f, pillarColor: 0xeb8b35 },
+  { key: 'yellow', label: '黄', enemyColor: 0xe7d73a, enemyEmissive: 0x7d6f22, pillarColor: 0xdfcb3d },
+]
+const COLOR_TRIAL_PROFILE_BY_KEY = new Map(COLOR_TRIAL_PROFILES.map((profile) => [profile.key, profile]))
 const mobileControls = {
   enabled:
     window.matchMedia('(pointer: coarse)').matches ||
@@ -184,6 +195,13 @@ const grassLevel = createGrassLevel({
 const lavaLevel = createLavaLevel({ THREE, world })
 const bleedLevel = createBleedLevel({ THREE, world })
 const shadowLevel = createShadowPillarLevel({ THREE, world })
+const colorTrialLevel = createColorTrialLevel({
+  THREE,
+  world,
+  config: {
+    colorProfiles: COLOR_TRIAL_PROFILES,
+  },
+})
 const peaceBoundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
 const grassPeaceSystem = createPeaceSystem({
   THREE,
@@ -248,6 +266,9 @@ const state = {
   shadowSunDamageAccumulator: 0,
   bleedTrailAccumulator: 0,
   inShadow: false,
+  colorCurseKey: null,
+  colorCurseLabel: '白',
+  colorCurseDamageAccumulator: 0,
   lastTrailPosition: new THREE.Vector3(0, CONSTANTS.PLAYER_HEIGHT, 12),
   currentLevelIndex: 0,
   levelLabel: LEVELS[0].label,
@@ -273,6 +294,43 @@ const healthPackRoot = new THREE.Group()
 world.add(healthPackRoot)
 const pickupBubbleRoot = new THREE.Group()
 camera.add(pickupBubbleRoot)
+
+const playerStatusRingMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.58,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+})
+playerStatusRingMaterial.fog = false
+const playerStatusRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.42, 0.72, 52),
+  playerStatusRingMaterial
+)
+playerStatusRing.rotation.x = -Math.PI / 2
+playerStatusRing.position.y = 0.05
+world.add(playerStatusRing)
+
+const playerStatusHaloMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0.18,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  side: THREE.DoubleSide,
+})
+playerStatusHaloMaterial.fog = false
+const playerStatusHalo = new THREE.Mesh(
+  new THREE.RingGeometry(0.84, 1.56, 52),
+  playerStatusHaloMaterial
+)
+playerStatusHalo.rotation.x = -Math.PI / 2
+playerStatusHalo.position.y = 0.04
+world.add(playerStatusHalo)
+
+const playerStatusLight = new THREE.PointLight(0xffffff, 0.38, 5.8, 2.25)
+playerStatusLight.position.set(0, 1.2, 0)
+world.add(playerStatusLight)
 
 const tempPackSpawnVector = new THREE.Vector3()
 const tempPackSpacingVector = new THREE.Vector3()
@@ -329,7 +387,8 @@ function getActiveLevelSystem() {
   if (state.currentLevelIndex === 0) return grassLevel
   if (state.currentLevelIndex === 1) return lavaLevel
   if (state.currentLevelIndex === 2) return bleedLevel
-  return shadowLevel
+  if (state.currentLevelIndex === 3) return shadowLevel
+  return colorTrialLevel
 }
 
 function getActivePeaceSystem() {
@@ -353,9 +412,13 @@ function isFixedDayLevel() {
 }
 
 function getFixedSunPosition() {
-  return state.currentLevelIndex === 3
-    ? CONSTANTS.SHADOW_LEVEL_SUN_POSITION
-    : CONSTANTS.BLEED_LEVEL_SUN_POSITION
+  if (state.currentLevelIndex === 3) {
+    return CONSTANTS.SHADOW_LEVEL_SUN_POSITION
+  }
+  if (state.currentLevelIndex === 4) {
+    return CONSTANTS.COLOR_TRIAL_SUN_POSITION
+  }
+  return CONSTANTS.BLEED_LEVEL_SUN_POSITION
 }
 
 function resetDayNightToNight() {
@@ -462,6 +525,56 @@ function triggerMobileForwardJump() {
   state.mobileJumpQueued = true
 }
 
+function updatePlayerColorStatusVisual(delta = 0) {
+  const activeProfile = state.colorCurseKey ? COLOR_TRIAL_PROFILE_BY_KEY.get(state.colorCurseKey) : null
+  const ringColor = activeProfile ? activeProfile.enemyColor : 0xffffff
+  const now = performance.now() * 0.001
+  const pulse = 1 + Math.sin(now * 4.6) * 0.08
+
+  playerStatusRing.visible = state.currentLevelIndex === 4
+  playerStatusHalo.visible = state.currentLevelIndex === 4
+  playerStatusLight.visible = state.currentLevelIndex === 4
+
+  playerStatusRing.position.set(state.playerPosition.x, 0.05, state.playerPosition.z)
+  playerStatusHalo.position.set(state.playerPosition.x, 0.04, state.playerPosition.z)
+  playerStatusLight.position.set(state.playerPosition.x, state.playerPosition.y - 0.45, state.playerPosition.z)
+
+  playerStatusRingMaterial.color.setHex(ringColor)
+  playerStatusHaloMaterial.color.setHex(ringColor)
+  playerStatusLight.color.setHex(ringColor)
+
+  if (activeProfile) {
+    playerStatusRingMaterial.opacity = THREE.MathUtils.lerp(playerStatusRingMaterial.opacity, 0.82, 0.12 + delta * 5)
+    playerStatusHaloMaterial.opacity = THREE.MathUtils.lerp(playerStatusHaloMaterial.opacity, 0.3, 0.12 + delta * 5)
+    playerStatusLight.intensity = THREE.MathUtils.lerp(playerStatusLight.intensity, 0.78 + pulse * 0.42, 0.12 + delta * 5)
+  } else {
+    playerStatusRingMaterial.opacity = THREE.MathUtils.lerp(playerStatusRingMaterial.opacity, 0.58, 0.14 + delta * 5)
+    playerStatusHaloMaterial.opacity = THREE.MathUtils.lerp(playerStatusHaloMaterial.opacity, 0.16, 0.14 + delta * 5)
+    playerStatusLight.intensity = THREE.MathUtils.lerp(playerStatusLight.intensity, 0.42 + pulse * 0.16, 0.14 + delta * 5)
+  }
+}
+
+function clearColorCurseState() {
+  state.colorCurseKey = null
+  state.colorCurseLabel = '白'
+  state.colorCurseDamageAccumulator = 0
+}
+
+function applyColorCurseFromEnemy(enemy) {
+  if (state.currentLevelIndex !== 4 || !enemy || !enemy.colorKey) {
+    return
+  }
+
+  const profile = COLOR_TRIAL_PROFILE_BY_KEY.get(enemy.colorKey)
+  if (!profile) {
+    return
+  }
+
+  state.colorCurseKey = profile.key
+  state.colorCurseLabel = profile.label
+  state.colorCurseDamageAccumulator = 0
+}
+
 function setLevel(index) {
   const previousLevelIndex = state.currentLevelIndex
   state.currentLevelIndex = THREE.MathUtils.clamp(index, 0, LEVELS.length - 1)
@@ -469,6 +582,7 @@ function setLevel(index) {
   lavaLevel.setActive(state.currentLevelIndex === 1)
   bleedLevel.setActive(state.currentLevelIndex === 2)
   shadowLevel.setActive(state.currentLevelIndex === 3)
+  colorTrialLevel.setActive(state.currentLevelIndex === 4)
   grassPeaceSystem.setActive(state.currentLevelIndex === 0)
   lavaPeaceSystem.setActive(state.currentLevelIndex === 1)
   healthPackRoot.visible = state.currentLevelIndex === 2
@@ -486,6 +600,7 @@ function setLevel(index) {
 
   if (previousLevelIndex !== state.currentLevelIndex) {
     resetBleedLevelObjects()
+    clearColorCurseState()
   }
 
   if (!isFixedDayLevel()) {
@@ -806,6 +921,40 @@ function updateShadowSunDamage(delta) {
   }
 }
 
+function updateColorTrialMechanics(delta) {
+  if (state.currentLevelIndex !== 4) {
+    state.colorCurseDamageAccumulator = 0
+    clearColorCurseState()
+    return
+  }
+
+  if (!state.colorCurseKey) {
+    return
+  }
+
+  const touchedColorKey = colorTrialLevel.getTouchedPillarColor(state.playerPosition)
+  if (touchedColorKey && touchedColorKey === state.colorCurseKey) {
+    state.hp = CONSTANTS.PLAYER_MAX_HP
+    state.damageFlash = Math.max(0, state.damageFlash - 0.3)
+    clearColorCurseState()
+    updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
+    return
+  }
+
+  const damageTickInterval = CONSTANTS.COLOR_CURSE_DAMAGE_INTERVAL_SECONDS
+  state.colorCurseDamageAccumulator += delta
+  while (state.colorCurseDamageAccumulator >= damageTickInterval) {
+    state.colorCurseDamageAccumulator -= damageTickInterval
+    applyPlayerDamage(CONSTANTS.COLOR_CURSE_DAMAGE_PER_SECOND * damageTickInterval, {
+      silent: true,
+      noShake: true,
+    })
+    if (state.ended) {
+      return
+    }
+  }
+}
+
 function applyFixedDayEnvironment() {
   const sunPosition = getFixedSunPosition()
   dayNightState.dayFactor = 1
@@ -826,7 +975,12 @@ function applyFixedDayEnvironment() {
   moonOrb.position.set(sunPosition.x * -0.5, 10, sunPosition.z * -0.5)
 
   sunOrb.position.copy(sunPosition)
-  const sunScale = state.currentLevelIndex === 3 ? 3.1 : 1.36
+  let sunScale = 1.36
+  if (state.currentLevelIndex === 3) {
+    sunScale = 3.1
+  } else if (state.currentLevelIndex === 4) {
+    sunScale = 1.58
+  }
   sunOrb.scale.setScalar(sunScale)
   sunOrbMaterial.opacity = 1
 
@@ -873,8 +1027,14 @@ function spawnEnemyForCurrentLevel() {
 
   const activeLevel = getActiveLevelSystem()
   const spawnData = activeLevel.getEnemySpawnPoint(CONSTANTS.ENEMY_BASE_HEIGHT)
+  let colorProfile = null
+  if (state.currentLevelIndex === 4) {
+    colorProfile =
+      COLOR_TRIAL_PROFILES[THREE.MathUtils.randInt(0, COLOR_TRIAL_PROFILES.length - 1)]
+  }
   spawnEnemy(world, enemies, {
     spawnPosition: spawnData.position,
+    colorProfile,
   })
 }
 
@@ -969,6 +1129,7 @@ function resetRound() {
   state.mobileJumpQueued = false
   clearPendingMobileTap()
   clearMobileComboMode()
+  clearColorCurseState()
   flashlightState.battery = 1
   flashlightState.flickerTimeLeft = 0
   flashlightState.flickerMultiplier = 1
@@ -1225,11 +1386,12 @@ function updateRoundState(delta) {
   updateLavaDamage(delta)
   updateBleedLevelMechanics(delta)
   updateShadowSunDamage(delta)
+  updateColorTrialMechanics(delta)
   if (state.ended) {
     return
   }
 
-  updateEnemies(enemies, state, camera, delta, applyPlayerDamage)
+  updateEnemies(enemies, state, camera, delta, applyPlayerDamage, applyColorCurseFromEnemy)
   if (state.ended) {
     return
   }
@@ -1511,6 +1673,7 @@ function animate() {
   updateHitRings(world, hitRings, camera, delta)
   updatePickupBubbles(delta)
   updateDamageOverlay(state, delta, damageOverlayEl)
+  updatePlayerColorStatusVisual(delta)
   applyCameraShake(state, camera, delta, CONSTANTS.CAMERA_SHAKE_DECAY)
   renderer.render(scene, camera)
   requestAnimationFrame(animate)

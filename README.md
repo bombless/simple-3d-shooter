@@ -8,12 +8,13 @@ Three.js + Vite で作られた、軽量な一人称 3D サバイバルシュー
 
 ## 中文说明
 
-### 关卡结构（四关）
+### 关卡结构（五关）
 
 1. 荒野防线：常规战斗，支持灯塔和平撤离。
 2. 熔岩平台：移动平台 + 岩浆伤害，支持灯塔和平撤离。
 3. 失血平原：固定白昼，玩家持续失血；需捡血包维持生命，地面会留下血迹；拾取血包会出现粉色泡泡。
 4. 烈日柱阵：固定白昼 + 巨大太阳；地图由高大白柱组成，玩家在阴影下才不会持续掉血。
+5. 色相试炼：固定白昼；敌人与柱子带有颜色属性，玩家被彩色怪触碰后会染色并持续失血，需触碰同色柱恢复满血并解除状态。
 
 ### 核心玩法
 
@@ -66,12 +67,13 @@ npm run build
 
 ## English
 
-### Stage Structure (4 Stages)
+### Stage Structure (5 Stages)
 
 1. Frontier Field: standard combat stage with pacifist lighthouse extraction.
 2. Lava Platforms: moving platforms + lava hazard, also supports lighthouse extraction.
 3. Bleed Plains: fixed daylight; the player constantly loses HP and must collect health packs. Blood trails appear on the ground, and collecting a pack triggers pink bubbles on screen.
 4. Sun Pillars: fixed daylight with a giant sun. The map contains only tall white pillars; the player must stay in pillar shadows to avoid HP drain.
+5. Chroma Trial: fixed daylight. Enemies and pillars have color states; touching a colored enemy curses the player with that color and causes constant HP drain until the matching pillar is touched, which fully restores HP.
 
 ### Core Gameplay
 
@@ -124,12 +126,13 @@ Deployment URL:
 
 ## 日本語
 
-### ステージ構成（全4ステージ）
+### ステージ構成（全5ステージ）
 
 1. 荒野防衛線：通常戦闘ステージ。灯台への平和撤退ルートあり。
 2. 溶岩プラットフォーム：移動足場 + 溶岩ダメージ。こちらも灯台撤退可能。
 3. 出血平原：固定の昼。プレイヤーは継続的にHPが減少し、回復パック回収が必要。地面に血痕が残り、回収時はピンク色バブルが表示。
 4. 烈日柱陣：固定の昼 + 巨大な太陽。高い白柱のみの地形で、柱の影にいる間だけ継続ダメージを回避可能。
+5. 色相試練：固定の昼。敵と柱に色属性があり、色付きの敵に触れるとプレイヤーが同色状態になって継続ダメージを受ける。対応する同色の柱に触れると全回復して解除される。
 
 ### 基本プレイ
 

@@ -2,15 +2,56 @@ import * as THREE from 'three'
 import { ENEMY_BASE_HEIGHT } from './constants'
 import { normalizeAngle, randomSpawn } from './utils'
 
+function colorFromProfile(baseColor, options = {}) {
+  const {
+    whiteMix = 0,
+    blackMix = 0,
+    hueShift = 0,
+    satShift = 0,
+    lightShift = 0,
+  } = options
+
+  const color = baseColor.clone()
+  if (whiteMix > 0) {
+    color.lerp(new THREE.Color(0xffffff), whiteMix)
+  }
+  if (blackMix > 0) {
+    color.lerp(new THREE.Color(0x000000), blackMix)
+  }
+
+  const hsl = { h: 0, s: 0, l: 0 }
+  color.getHSL(hsl)
+  const hue = ((hsl.h + hueShift) % 1 + 1) % 1
+  const saturation = THREE.MathUtils.clamp(hsl.s + satShift, 0, 1)
+  const lightness = THREE.MathUtils.clamp(hsl.l + lightShift, 0, 1)
+  return new THREE.Color().setHSL(hue, saturation, lightness)
+}
+
 export function spawnEnemy(world, enemies, options = {}) {
-  const { spawnPosition } = options
+  const { spawnPosition, colorProfile = null } = options
   const mesh = new THREE.Group()
   mesh.position.copy(spawnPosition || randomSpawn(ENEMY_BASE_HEIGHT))
   const coreRadius = THREE.MathUtils.randFloat(0.75, 0.95)
+  const baseEnemyColor = colorProfile ? new THREE.Color(colorProfile.enemyColor) : null
+  const baseEnemyEmissive = colorProfile ? new THREE.Color(colorProfile.enemyEmissive) : null
 
   const coreMaterial = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.96, 1.03), 0.52, 0.26),
-    emissive: new THREE.Color().setHSL(0.0, 0.75, 0.08),
+    color: baseEnemyColor
+      ? colorFromProfile(baseEnemyColor, {
+          blackMix: THREE.MathUtils.randFloat(0.14, 0.32),
+          hueShift: THREE.MathUtils.randFloatSpread(0.015),
+          satShift: THREE.MathUtils.randFloat(-0.08, 0.1),
+          lightShift: THREE.MathUtils.randFloat(-0.08, 0.06),
+        })
+      : new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.96, 1.03), 0.52, 0.26),
+    emissive: baseEnemyEmissive
+      ? colorFromProfile(baseEnemyEmissive, {
+          blackMix: THREE.MathUtils.randFloat(0.15, 0.3),
+          hueShift: THREE.MathUtils.randFloatSpread(0.01),
+          satShift: THREE.MathUtils.randFloat(-0.06, 0.08),
+          lightShift: THREE.MathUtils.randFloat(-0.06, 0.06),
+        })
+      : new THREE.Color().setHSL(0.0, 0.75, 0.08),
     roughness: 0.84,
     metalness: 0.05,
   })
@@ -30,8 +71,22 @@ export function spawnEnemy(world, enemies, options = {}) {
     const radius = THREE.MathUtils.randFloat(0.11, 0.26)
     const organGeometry = new THREE.SphereGeometry(radius, 12, 10)
     const organMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.97, 1.02), 0.67, 0.35),
-      emissive: new THREE.Color().setHSL(0.01, 0.85, 0.1),
+      color: baseEnemyColor
+        ? colorFromProfile(baseEnemyColor, {
+            whiteMix: THREE.MathUtils.randFloat(0.04, 0.18),
+            hueShift: THREE.MathUtils.randFloatSpread(0.02),
+            satShift: THREE.MathUtils.randFloat(-0.05, 0.09),
+            lightShift: THREE.MathUtils.randFloat(0.02, 0.14),
+          })
+        : new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.97, 1.02), 0.67, 0.35),
+      emissive: baseEnemyEmissive
+        ? colorFromProfile(baseEnemyEmissive, {
+            blackMix: THREE.MathUtils.randFloat(0.08, 0.2),
+            hueShift: THREE.MathUtils.randFloatSpread(0.014),
+            satShift: THREE.MathUtils.randFloat(-0.04, 0.08),
+            lightShift: THREE.MathUtils.randFloat(-0.03, 0.08),
+          })
+        : new THREE.Color().setHSL(0.01, 0.85, 0.1),
       roughness: 0.58,
       metalness: 0.08,
     })
@@ -72,8 +127,22 @@ export function spawnEnemy(world, enemies, options = {}) {
     const sclera = new THREE.Mesh(
       new THREE.SphereGeometry(eyeRadius, 16, 14),
       new THREE.MeshStandardMaterial({
-        color: new THREE.Color().setHSL(0.08, 0.18, THREE.MathUtils.randFloat(0.8, 0.92)),
-        emissive: new THREE.Color().setHSL(0.0, 0.28, 0.04),
+        color: baseEnemyColor
+          ? colorFromProfile(baseEnemyColor, {
+              whiteMix: THREE.MathUtils.randFloat(0.72, 0.84),
+              hueShift: THREE.MathUtils.randFloatSpread(0.01),
+              satShift: THREE.MathUtils.randFloat(-0.2, -0.08),
+              lightShift: THREE.MathUtils.randFloat(0.02, 0.08),
+            })
+          : new THREE.Color().setHSL(0.08, 0.18, THREE.MathUtils.randFloat(0.8, 0.92)),
+        emissive: baseEnemyEmissive
+          ? colorFromProfile(baseEnemyEmissive, {
+              blackMix: THREE.MathUtils.randFloat(0.35, 0.5),
+              hueShift: THREE.MathUtils.randFloatSpread(0.01),
+              satShift: THREE.MathUtils.randFloat(-0.1, 0.05),
+              lightShift: THREE.MathUtils.randFloat(-0.05, 0.04),
+            })
+          : new THREE.Color().setHSL(0.0, 0.28, 0.04),
         roughness: 0.4,
         metalness: 0.02,
       })
@@ -86,8 +155,22 @@ export function spawnEnemy(world, enemies, options = {}) {
     const pupil = new THREE.Mesh(
       new THREE.SphereGeometry(eyeRadius * 0.43, 12, 10),
       new THREE.MeshStandardMaterial({
-        color: 0x050206,
-        emissive: 0x220018,
+        color: baseEnemyColor
+          ? colorFromProfile(baseEnemyColor, {
+              blackMix: THREE.MathUtils.randFloat(0.66, 0.8),
+              hueShift: THREE.MathUtils.randFloatSpread(0.01),
+              satShift: THREE.MathUtils.randFloat(-0.05, 0.05),
+              lightShift: THREE.MathUtils.randFloat(-0.08, 0.02),
+            })
+          : 0x050206,
+        emissive: baseEnemyEmissive
+          ? colorFromProfile(baseEnemyEmissive, {
+              blackMix: THREE.MathUtils.randFloat(0.42, 0.62),
+              hueShift: THREE.MathUtils.randFloatSpread(0.01),
+              satShift: THREE.MathUtils.randFloat(-0.04, 0.07),
+              lightShift: THREE.MathUtils.randFloat(-0.04, 0.04),
+            })
+          : 0x220018,
         roughness: 0.25,
         metalness: 0.05,
       })
@@ -127,8 +210,22 @@ export function spawnEnemy(world, enemies, options = {}) {
       const segment = new THREE.Mesh(
         new THREE.SphereGeometry(radius, 12, 10),
         new THREE.MeshStandardMaterial({
-          color: new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.28, 0.4), 0.45, 0.22),
-          emissive: new THREE.Color().setHSL(0.31, 0.6, 0.06),
+          color: baseEnemyColor
+            ? colorFromProfile(baseEnemyColor, {
+                blackMix: THREE.MathUtils.randFloat(0.28, 0.46),
+                hueShift: THREE.MathUtils.randFloatSpread(0.03),
+                satShift: THREE.MathUtils.randFloat(-0.08, 0.08),
+                lightShift: THREE.MathUtils.randFloat(-0.08, 0.04),
+              })
+            : new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.28, 0.4), 0.45, 0.22),
+          emissive: baseEnemyEmissive
+            ? colorFromProfile(baseEnemyEmissive, {
+                blackMix: THREE.MathUtils.randFloat(0.24, 0.38),
+                hueShift: THREE.MathUtils.randFloatSpread(0.018),
+                satShift: THREE.MathUtils.randFloat(-0.06, 0.08),
+                lightShift: THREE.MathUtils.randFloat(-0.04, 0.06),
+              })
+            : new THREE.Color().setHSL(0.31, 0.6, 0.06),
           roughness: 0.74,
           metalness: 0.03,
         })
@@ -179,6 +276,7 @@ export function spawnEnemy(world, enemies, options = {}) {
     spinSpeed: THREE.MathUtils.randFloat(1.25, 2.05),
     speed: THREE.MathUtils.randFloat(1.7, 2.8),
     damageCooldown: THREE.MathUtils.randFloat(0.2, 0.9),
+    colorKey: colorProfile ? colorProfile.key : null,
   }
 
   enemies.push(enemy)
@@ -219,7 +317,14 @@ const tempEnemyEyeForward = new THREE.Vector3()
 const tempEnemyEyeToCamera = new THREE.Vector3()
 const tempEnemyEyeQuaternion = new THREE.Quaternion()
 
-export function updateEnemies(enemies, state, camera, delta, applyPlayerDamage) {
+export function updateEnemies(
+  enemies,
+  state,
+  camera,
+  delta,
+  applyPlayerDamage,
+  onEnemyHitPlayer = null
+) {
   const now = performance.now() * 0.001
 
   for (const enemy of enemies) {
@@ -305,6 +410,9 @@ export function updateEnemies(enemies, state, camera, delta, applyPlayerDamage) 
     enemy.damageCooldown -= delta
     if (distance < 1.9 && enemy.damageCooldown <= 0) {
       enemy.damageCooldown = 0.9
+      if (typeof onEnemyHitPlayer === 'function') {
+        onEnemyHitPlayer(enemy)
+      }
       applyPlayerDamage(9)
       if (state.ended) {
         return
