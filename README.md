@@ -1,41 +1,37 @@
-# Simple 3D Shooter (PC 单机)
+# Beaconfall / 信标绝境 / ビーコンフォール
 
-一个基于 **Three.js + Vite** 的轻量 3D 射击小游戏，适合本地快速跑起来和继续二次开发。
+A lightweight first-person 3D survival shooter built with Three.js + Vite.
 
-## 功能
+一个基于 Three.js + Vite 的轻量第一人称 3D 生存射击游戏。
 
-- 第一人称视角（鼠标控制镜头）
-- WASD 移动
-- 左键射击（屏幕中心准星）
-- 敌人为克苏鲁风肉球体（外凸组织 + 异形眼球 + 蠕动触须）
-- 命中敌人会触发溅血粒子特效
-- 射击 / 命中 / 受击音效（WebAudio）
-- 胜利时播放庆祝旋律
-- 命中与受击触发屏幕震动
-- 50 秒昼夜循环（开局夜晚，太阳与月亮沿天空轨道运行；夜晚极暗并启用狭长椭圆手电筒照明）
-- 手电筒电量机制（夜间耗电、白天回充、低电量抖动与闪烁）
-- 手电异常效果强度可通过 `-` / `=` 按钮调节，并在右侧巨型指示条实时显示
-- 底部 HP 指示条与受击血光效果（掉血时闪红，低血量持续压迫感）
-- 敌人追击与伤害判定
-- 双关卡流程：第一关为荒野地图，胜利后可选择进入第二关
-- 两关都保留灯塔和平玩法：抵达对应灯塔可直接胜利
-- 熔岩关卡：第二关为岩浆池与移动平台，需要在平台上战斗
-- 岩浆环境光：岩浆和周边热光源会脉动照亮附近区域
-- 岩浆伤害机制：角色接触岩浆会周期性掉血
-- 计分、生命值、倒计时 HUD
-- 胜负结算、暂停与重开
+Three.js + Vite で作られた、軽量な一人称 3D サバイバルシューティングです。
 
-## 环境要求
+## 中文说明
+
+### 玩法概览
+
+- 第一人称射击，`W/A/S/D` 移动，`Space` 跳跃，鼠标左键射击
+- 双关卡结构
+- 第一关：荒野防线（可战斗胜利，也可灯塔和平撤离）
+- 第二关：熔岩平台（可战斗胜利，也可灯塔和平撤离）
+- 50 秒昼夜循环（进入第二关时会重置到夜晚）
+- 夜间手电筒电量机制（夜耗电、昼回充）
+- 命中反馈：金色命中光圈
+- 敌人：克苏鲁风肉球体，持续追击玩家
+
+### 胜负条件
+
+- 击败 `20` 个敌人立即胜利
+- 或存活 `90` 秒胜利
+- 或抵达当前关卡灯塔和平撤离胜利
+- 生命值降为 `0` 则失败
+
+### 运行环境
 
 - Node.js 18+
 - npm 9+
 
-当前机器已验证版本：
-
-- Node.js `v25.7.0`
-- npm `11.11.0`
-
-## 安装与启动
+### 安装与启动
 
 ```bash
 cd /home/openclaw/simple-3d-shooter
@@ -43,38 +39,96 @@ npm install
 npm run start
 ```
 
-默认地址：
+默认地址：`http://localhost:4173`
 
-- `http://localhost:4173`
-
-## 操作说明
-
-- `W/A/S/D`：移动
-- `Space`：跳跃
-- 鼠标移动：视角旋转
-- 鼠标左键：射击
-- `Esc`：暂停（释放鼠标）
-- `R`：重开
-
-## 胜负规则（两关通用）
-
-- 击败 `20` 个敌人，立即胜利
-- 或生存 `90` 秒，胜利
-- 生命值降到 `0`，失败
-- 两关都可通过击败敌人/生存，或前往灯塔和平撤离来胜利
-- 第一关胜利后会弹窗提示“进入下一关”
-
-## 打包构建
+### 构建
 
 ```bash
 npm run build
 ```
 
-构建产物在 `dist/`。
+---
 
-## 可调参数（在 `src/main.js`）
+## English
 
-- `enemyGoal`: 胜利击杀数（默认 `20`）
-- `roundTime`: 回合时长秒数（默认 `90`）
-- 刷新间隔与上限：`spawnAccumulator` / `enemies.length < 14`
-- 玩家移速：`moveSpeed = 10`
+### Gameplay
+
+- First-person shooter controls: `W/A/S/D` move, `Space` jump, left mouse to shoot
+- Two-stage progression
+- Stage 1: Frontier Field (combat win or pacifist lighthouse extraction)
+- Stage 2: Lava Platforms (combat win or pacifist lighthouse extraction)
+- 50-second day/night cycle (resets to night when entering stage 2)
+- Flashlight battery system (drains at night, recharges in daylight)
+- Hit feedback uses a golden hit ring effect
+- Eldritch enemies continuously chase the player
+
+### Win / Lose Conditions
+
+- Win by defeating `20` enemies
+- Or win by surviving for `90` seconds
+- Or win by reaching the lighthouse extraction point in the current stage
+- Lose when HP reaches `0`
+
+### Requirements
+
+- Node.js 18+
+- npm 9+
+
+### Install & Run
+
+```bash
+cd /home/openclaw/simple-3d-shooter
+npm install
+npm run start
+```
+
+Default URL: `http://localhost:4173`
+
+### Build
+
+```bash
+npm run build
+```
+
+---
+
+## 日本語
+
+### ゲーム概要
+
+- 一人称シューティング操作: `W/A/S/D` 移動、`Space` ジャンプ、左クリックで射撃
+- 2ステージ構成
+- 第1ステージ: 荒野防衛線（戦闘勝利または灯台への平和撤退）
+- 第2ステージ: 溶岩プラットフォーム（戦闘勝利または灯台への平和撤退）
+- 50秒の昼夜サイクル（第2ステージ開始時に夜へリセット）
+- 懐中電灯バッテリー（夜に消耗、昼に回復）
+- ヒット時は金色リングでフィードバック
+- 異形の敵が継続してプレイヤーを追跡
+
+### 勝敗条件
+
+- 敵を `20` 体倒すと勝利
+- または `90` 秒生存で勝利
+- または現在ステージの灯台到達で平和勝利
+- HP が `0` で敗北
+
+### 動作環境
+
+- Node.js 18+
+- npm 9+
+
+### インストールと起動
+
+```bash
+cd /home/openclaw/simple-3d-shooter
+npm install
+npm run start
+```
+
+既定 URL: `http://localhost:4173`
+
+### ビルド
+
+```bash
+npm run build
+```

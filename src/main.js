@@ -22,7 +22,7 @@ const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 两关都可通过灯塔和平胜利 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 两关都可通过灯塔和平撤离胜利 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <div id="damage-overlay"></div>
@@ -33,9 +33,9 @@ app.innerHTML = `
     </div>
   </div>
   <div id="message" class="visible">
-    <h1>Cube Strike</h1>
+    <h1>Beaconfall</h1>
     <p>双关卡生存射击</p>
-    <p class="sub">第一关与第二关都支持和平撤离：找到对应灯塔即可胜利。第一关胜利后可进入第二关熔岩平台。</p>
+    <p class="sub">双关卡生存战：两关都支持战斗胜利与灯塔和平撤离。第一关完成后可进入第二关熔岩平台。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
