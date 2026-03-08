@@ -69,19 +69,39 @@ export function createPeaceSystem({
   beaconGlow.receiveShadow = false
   lighthouse.add(beaconGlow)
 
-  const haloMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffd36e,
-    emissive: 0xffb13b,
-    emissiveIntensity: 1.65,
-    roughness: 0.18,
-    metalness: 0.42,
+  const haloMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffd76f,
+    transparent: true,
+    opacity: 0.96,
   })
+  haloMaterial.fog = false
   const halo = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.11, 18, 52), haloMaterial)
   halo.position.y = 7.9
   halo.rotation.x = Math.PI * 0.5
   halo.castShadow = false
   halo.receiveShadow = false
   lighthouse.add(halo)
+
+  const haloAuraMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffcc55,
+    transparent: true,
+    opacity: 0.52,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  haloAuraMaterial.fog = false
+  const haloAura = new THREE.Mesh(new THREE.TorusGeometry(1.86, 0.24, 20, 64), haloAuraMaterial)
+  haloAura.position.y = 7.9
+  haloAura.rotation.x = Math.PI * 0.5
+  haloAura.castShadow = false
+  haloAura.receiveShadow = false
+  lighthouse.add(haloAura)
+
+  const haloLight = new THREE.PointLight(0xffd27a, 1.6, 18, 1.4)
+  haloLight.position.set(0, 7.9, 0)
+  haloLight.castShadow = false
+  lighthouse.add(haloLight)
 
   const spotlight = new THREE.SpotLight(0xeaf6ff, 2.2, 32, Math.PI / 7.2, 0.56, 1.08)
   spotlight.position.set(0, 6.5, 0)
@@ -125,12 +145,23 @@ export function createPeaceSystem({
       THREE.MathUtils.lerp(0.8, 1.95, nightFactor) *
       (0.88 + Math.sin(nowSeconds * 1.8 + 0.4) * 0.12)
 
-    const haloPulse = 0.86 + Math.sin(nowSeconds * 1.6 + 0.9) * 0.22
-    halo.position.y = 7.9 + Math.sin(nowSeconds * 1.1 + 0.3) * 0.16
-    halo.rotation.y = nowSeconds * 0.58
-    halo.rotation.z = Math.sin(nowSeconds * 0.72 + 0.5) * 0.12
-    haloMaterial.emissiveIntensity =
-      THREE.MathUtils.lerp(1.2, 2.2, nightFactor) * haloPulse
+    const haloPulse = 0.92 + Math.sin(nowSeconds * 1.55 + 0.9) * 0.08
+    const haloHeight = 7.9 + Math.sin(nowSeconds * 1.02 + 0.3) * 0.05
+    halo.position.y = haloHeight
+    halo.rotation.y = nowSeconds * 0.36
+    halo.rotation.z = Math.sin(nowSeconds * 0.72 + 0.5) * 0.03
+    haloMaterial.opacity = THREE.MathUtils.clamp(0.86 + nightFactor * 0.08 + haloPulse * 0.08, 0.82, 1)
+
+    haloAura.position.y = haloHeight
+    haloAura.rotation.y = -nowSeconds * 0.24
+    haloAura.rotation.z = Math.sin(nowSeconds * 0.55 + 1.2) * 0.028
+    haloAuraMaterial.opacity = THREE.MathUtils.clamp(
+      0.42 + nightFactor * 0.24 + haloPulse * 0.1,
+      0.36,
+      0.82
+    )
+
+    haloLight.intensity = THREE.MathUtils.lerp(1.8, 3.4, nightFactor) * haloPulse
   }
 
   function checkPeacefulWinCondition(playerPosition) {
