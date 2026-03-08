@@ -1,3 +1,5 @@
+import { createDayBeacon } from './dayBeacon'
+
 function addCylinderCollider(colliders, x, y, z, radius, height) {
   colliders.push({
     minX: x - radius,
@@ -113,6 +115,15 @@ export function createColorTrialLevel({ THREE, world, config = {} }) {
     })
   }
 
+  const dayBeacon = createDayBeacon({
+    THREE,
+    color: 0x8d949f,
+    accentColor: 0xeaf1ff,
+    glowColor: 0xbdd3ff,
+  })
+  dayBeacon.group.position.set(0, 0, -24)
+  root.add(dayBeacon.group)
+
   function setActive(active) {
     root.visible = active
   }
@@ -122,6 +133,7 @@ export function createColorTrialLevel({ THREE, world, config = {} }) {
       return
     }
 
+    dayBeacon.update(performance.now() * 0.001)
     const now = performance.now() * 0.001
     for (const pillar of pillars) {
       const pulse = 0.5 + Math.sin(now * 3.1 + pillar.pulsePhase) * 0.14

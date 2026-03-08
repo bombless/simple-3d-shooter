@@ -1,3 +1,5 @@
+import { createDayBeacon } from './dayBeacon'
+
 const tempOrigin = { v: null }
 const tempDirection = { v: null }
 
@@ -82,6 +84,22 @@ export function createShadowPillarLevel({ THREE, world }) {
     addCylinderCollider(colliders, x, height / 2, z, radius, height)
   }
 
+  const dayBeacon = createDayBeacon({
+    THREE,
+    color: 0xc3c5cf,
+    accentColor: 0xf4f6ff,
+    glowColor: 0xfff0b1,
+  })
+  dayBeacon.group.position.set(23.5, 0, -23.5)
+  dayBeacon.group.traverse((node) => {
+    if (node.isMesh) {
+      // Keep sunlight shadow gameplay unchanged.
+      node.castShadow = false
+      node.receiveShadow = true
+    }
+  })
+  root.add(dayBeacon.group)
+
   const shadowRaycaster = new THREE.Raycaster()
   if (!tempOrigin.v) tempOrigin.v = new THREE.Vector3()
   if (!tempDirection.v) tempDirection.v = new THREE.Vector3()
@@ -105,7 +123,10 @@ export function createShadowPillarLevel({ THREE, world }) {
   }
 
   function update() {
-    // Static geometry.
+    if (!root.visible) {
+      return
+    }
+    dayBeacon.update(performance.now() * 0.001)
   }
 
   function getEnemySpawnPoint(enemyBaseHeight) {

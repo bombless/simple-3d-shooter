@@ -1,3 +1,5 @@
+import { createDayBeacon } from './dayBeacon'
+
 export function createBleedLevel({ THREE, world }) {
   const root = new THREE.Group()
   world.add(root)
@@ -47,12 +49,24 @@ export function createBleedLevel({ THREE, world }) {
     })
   }
 
+  const dayBeacon = createDayBeacon({
+    THREE,
+    color: 0x9f8b72,
+    accentColor: 0xffd9b1,
+    glowColor: 0xffb982,
+  })
+  dayBeacon.group.position.set(0, 0, -24)
+  root.add(dayBeacon.group)
+
   function setActive(active) {
     root.visible = active
   }
 
   function update() {
-    // Static level geometry.
+    if (!root.visible) {
+      return
+    }
+    dayBeacon.update(performance.now() * 0.001)
   }
 
   function getEnemySpawnPoint(enemyBaseHeight) {
