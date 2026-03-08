@@ -22,15 +22,24 @@ const startBtn = document.querySelector('#start-btn')
 
 const DAY_NIGHT_CYCLE_SECONDS = 50
 const SKY_DAY_COLOR = new THREE.Color(0x89b2ff)
+const SKY_DUSK_COLOR = new THREE.Color(0x2d3a63)
 const SKY_NIGHT_COLOR = new THREE.Color(0x03050a)
 const FOG_DAY_COLOR = new THREE.Color(0x89b2ff)
+const FOG_DUSK_COLOR = new THREE.Color(0x1c253f)
 const FOG_NIGHT_COLOR = new THREE.Color(0x010203)
 const SUN_DAY_COLOR = new THREE.Color(0xffffff)
 const SUN_NIGHT_COLOR = new THREE.Color(0x4d5e8c)
+const MOON_DAY_COLOR = new THREE.Color(0x6f86b8)
+const MOON_NIGHT_COLOR = new THREE.Color(0xaec5ff)
 const dayNightState = {
   startedAtMs: performance.now(),
   dayFactor: 0,
 }
+const CELESTIAL_ORBIT_RADIUS = 58
+const CELESTIAL_ORBIT_TILT = 0.42
+const CELESTIAL_ORBIT_AXIS = new THREE.Vector3(0, 0, 1)
+const tempSunOrbitPos = new THREE.Vector3()
+const tempMoonOrbitPos = new THREE.Vector3()
 
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
@@ -54,6 +63,17 @@ sunLight.position.set(10, 18, 7)
 sunLight.castShadow = true
 sunLight.shadow.mapSize.set(1024, 1024)
 scene.add(sunLight)
+const sunLightTarget = new THREE.Object3D()
+scene.add(sunLightTarget)
+sunLight.target = sunLightTarget
+
+const moonLight = new THREE.DirectionalLight(0xaec5ff, 0.28)
+moonLight.position.set(-8, 14, -6)
+moonLight.castShadow = false
+scene.add(moonLight)
+const moonLightTarget = new THREE.Object3D()
+scene.add(moonLightTarget)
+moonLight.target = moonLightTarget
 
 const flashlight = new THREE.SpotLight(0xeef4ff, 0, 11.5, Math.PI / 11.5, 0.72, 1.45)
 flashlight.position.set(0, -0.06, 0)
@@ -63,6 +83,16 @@ flashlightTarget.position.set(0, -0.14, -6.4)
 camera.add(flashlight)
 camera.add(flashlightTarget)
 flashlight.target = flashlightTarget
+
+const sunOrbMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1b6, transparent: true, opacity: 1 })
+sunOrbMaterial.fog = false
+const sunOrb = new THREE.Mesh(new THREE.SphereGeometry(1.8, 24, 24), sunOrbMaterial)
+scene.add(sunOrb)
+
+const moonOrbMaterial = new THREE.MeshBasicMaterial({ color: 0xd8e4ff, transparent: true, opacity: 1 })
+moonOrbMaterial.fog = false
+const moonOrb = new THREE.Mesh(new THREE.SphereGeometry(1.5, 22, 20), moonOrbMaterial)
+scene.add(moonOrb)
 
 const world = new THREE.Group()
 scene.add(world)
@@ -342,17 +372,57 @@ function applyCameraShake(delta) {
 function updateDayNightCycle() {
   const elapsedSeconds = (performance.now() - dayNightState.startedAtMs) / 1000
   const cycleProgress = (elapsedSeconds % DAY_NIGHT_CYCLE_SECONDS) / DAY_NIGHT_CYCLE_SECONDS
-  const dayFactor = (1 - Math.cos(cycleProgress * Math.PI * 2)) * 0.5
+  const orbitAngle = cycleProgress * Math.PI * 2 - Math.PI / 2
+  const sunHeight = Math.sin(orbitAngle)
+  const moonHeight = -sunHeight
+  const dayFactor = THREE.MathUtils.smoothstep(sunHeight, -0.12, 0.38)
+  const nightFactor = 1 - dayFactor
+  const duskFactor = 1 - Math.abs(dayFactor * 2 - 1)
   dayNightState.dayFactor = dayFactor
 
-  scene.background.copy(SKY_NIGHT_COLOR).lerp(SKY_DAY_COLOR, dayFactor)
-  scene.fog.color.copy(FOG_NIGHT_COLOR).lerp(FOG_DAY_COLOR, dayFactor)
+  tempSunOrbitPos.set(
+    Math.cos(orbitAngle) * CELESTIAL_ORBIT_RADIUS,
+    Math.sin(orbitAngle) * CELESTIAL_ORBIT_RADIUS,
+    Math.sin(orbitAngle * 0.75) * CELESTIAL_ORBIT_RADIUS * 0.32
+  )
+  tempSunOrbitPos.applyAxisAngle(CELESTIAL_ORBIT_AXIS, CELESTIAL_ORBIT_TILT)
+  tempSunOrbitPos.x += state.playerPosition.x
+  tempSunOrbitPos.y += 10
+  tempSunOrbitPos.z += state.playerPosition.z
+
+  tempMoonOrbitPos.set(
+    Math.cos(orbitAngle + Math.PI) * CELESTIAL_ORBIT_RADIUS,
+    Math.sin(orbitAngle + Math.PI) * CELESTIAL_ORBIT_RADIUS,
+    Math.sin((orbitAngle + Math.PI) * 0.75) * CELESTIAL_ORBIT_RADIUS * 0.32
+  )
+  tempMoonOrbitPos.applyAxisAngle(CELESTIAL_ORBIT_AXIS, CELESTIAL_ORBIT_TILT)
+  tempMoonOrbitPos.x += state.playerPosition.x
+  tempMoonOrbitPos.y += 10
+  tempMoonOrbitPos.z += state.playerPosition.z
+
+  sunOrb.position.copy(tempSunOrbitPos)
+  moonOrb.position.copy(tempMoonOrbitPos)
+  sunOrbMaterial.opacity = THREE.MathUtils.clamp((sunHeight + 0.24) / 1.24, 0, 1)
+  moonOrbMaterial.opacity = THREE.MathUtils.clamp((moonHeight + 0.22) / 1.22, 0.08, 1)
+
+  scene.background.copy(SKY_NIGHT_COLOR)
+  scene.background.lerp(SKY_DUSK_COLOR, duskFactor * 0.65)
+  scene.background.lerp(SKY_DAY_COLOR, dayFactor)
+  scene.fog.color.copy(FOG_NIGHT_COLOR)
+  scene.fog.color.lerp(FOG_DUSK_COLOR, duskFactor * 0.72)
+  scene.fog.color.lerp(FOG_DAY_COLOR, dayFactor)
   scene.fog.near = THREE.MathUtils.lerp(0.45, 35, dayFactor)
   scene.fog.far = THREE.MathUtils.lerp(8.5, 80, dayFactor)
 
   hemiLight.intensity = THREE.MathUtils.lerp(0.008, 0.6, dayFactor)
-  sunLight.intensity = THREE.MathUtils.lerp(0.02, 1.2, dayFactor)
+  sunLight.position.copy(sunOrb.position)
+  sunLightTarget.position.set(state.playerPosition.x, 0.8, state.playerPosition.z)
+  sunLight.intensity = THREE.MathUtils.lerp(0.01, 1.2, dayFactor)
   sunLight.color.copy(SUN_NIGHT_COLOR).lerp(SUN_DAY_COLOR, dayFactor)
+  moonLight.position.copy(moonOrb.position)
+  moonLightTarget.position.set(state.playerPosition.x, 0.8, state.playerPosition.z)
+  moonLight.intensity = THREE.MathUtils.lerp(0.015, 0.34, nightFactor * THREE.MathUtils.clamp((moonHeight + 0.18) / 1.18, 0, 1))
+  moonLight.color.copy(MOON_DAY_COLOR).lerp(MOON_NIGHT_COLOR, nightFactor)
 
   flashlight.intensity = THREE.MathUtils.lerp(5.8, 0, Math.pow(dayFactor, 1.35))
   flashlight.distance = THREE.MathUtils.lerp(10.8, 2.5, dayFactor)
