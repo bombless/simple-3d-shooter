@@ -79,6 +79,9 @@ const CELESTIAL_ORBIT_TILT = 0.42
 const CELESTIAL_ORBIT_AXIS = new THREE.Vector3(0, 0, 1)
 const PLAYER_MAX_HP = 100
 const DAMAGE_FLASH_DECAY = 1.12
+const AUDIO_MASTER_GAIN = 0.42
+const AUDIO_SFX_GAIN = 1.2
+const AUDIO_AMBIENCE_GAIN = 1.35
 const tempSunOrbitPos = new THREE.Vector3()
 const tempMoonOrbitPos = new THREE.Vector3()
 
@@ -243,7 +246,19 @@ const bloodBursts = []
 const audioState = {
   context: null,
   master: null,
+  sfxBus: null,
+  ambienceBus: null,
   lastVictoryAt: 0,
+  nightAmbience: {
+    initialized: false,
+    layerGain: null,
+    noiseFilter: null,
+    droneFilter: null,
+    droneAGain: null,
+    droneBGain: null,
+    whineGain: null,
+    whineFilter: null,
+  },
 }
 const tempEnemyEyePosition = new THREE.Vector3()
 const tempEnemyEyeForward = new THREE.Vector3()
@@ -386,18 +401,167 @@ function ensureAudioReady() {
 
     const context = new AudioContextClass()
     const master = context.createGain()
-    master.gain.value = 0.22
+    const sfxBus = context.createGain()
+    const ambienceBus = context.createGain()
+    master.gain.value = AUDIO_MASTER_GAIN
+    sfxBus.gain.value = AUDIO_SFX_GAIN
+    ambienceBus.gain.value = AUDIO_AMBIENCE_GAIN
+    sfxBus.connect(master)
+    ambienceBus.connect(master)
     master.connect(context.destination)
 
     audioState.context = context
     audioState.master = master
+    audioState.sfxBus = sfxBus
+    audioState.ambienceBus = ambienceBus
   }
+
+  ensureNightAmbience()
 
   if (audioState.context.state === 'suspended') {
     audioState.context.resume().catch(() => {})
   }
 
-  return audioState.context.state === 'running'
+  return audioState.context.state !== 'closed'
+}
+
+function createNoiseBuffer(context, durationSeconds = 2.4) {
+  const frameCount = Math.floor(context.sampleRate * durationSeconds)
+  const buffer = context.createBuffer(1, frameCount, context.sampleRate)
+  const data = buffer.getChannelData(0)
+
+  let previous = 0
+  for (let i = 0; i < frameCount; i += 1) {
+    const white = Math.random() * 2 - 1
+    previous = previous * 0.982 + white * 0.18
+    data[i] = previous
+  }
+
+  return buffer
+}
+
+function ensureNightAmbience() {
+  if (!audioState.context || !audioState.ambienceBus || audioState.nightAmbience.initialized) {
+    return
+  }
+
+  const context = audioState.context
+  const layerGain = context.createGain()
+  layerGain.gain.value = 0
+  layerGain.connect(audioState.ambienceBus)
+
+  const noiseSource = context.createBufferSource()
+  noiseSource.buffer = createNoiseBuffer(context)
+  noiseSource.loop = true
+  const noiseFilter = context.createBiquadFilter()
+  noiseFilter.type = 'bandpass'
+  noiseFilter.frequency.value = 380
+  noiseFilter.Q.value = 0.95
+  const noiseGain = context.createGain()
+  noiseGain.gain.value = 0.17
+  noiseSource.connect(noiseFilter)
+  noiseFilter.connect(noiseGain)
+  noiseGain.connect(layerGain)
+
+  const droneA = context.createOscillator()
+  droneA.type = 'sawtooth'
+  droneA.frequency.value = 67
+  droneA.detune.value = -8
+  const droneAGain = context.createGain()
+  droneAGain.gain.value = 0.11
+
+  const droneB = context.createOscillator()
+  droneB.type = 'triangle'
+  droneB.frequency.value = 93
+  droneB.detune.value = 6
+  const droneBGain = context.createGain()
+  droneBGain.gain.value = 0.085
+
+  const droneFilter = context.createBiquadFilter()
+  droneFilter.type = 'lowpass'
+  droneFilter.frequency.value = 360
+  droneFilter.Q.value = 0.8
+
+  droneA.connect(droneAGain)
+  droneAGain.connect(droneFilter)
+  droneB.connect(droneBGain)
+  droneBGain.connect(droneFilter)
+  droneFilter.connect(layerGain)
+
+  const whine = context.createOscillator()
+  whine.type = 'sine'
+  whine.frequency.value = 178
+  const whineFilter = context.createBiquadFilter()
+  whineFilter.type = 'bandpass'
+  whineFilter.frequency.value = 720
+  whineFilter.Q.value = 2.3
+  const whineGain = context.createGain()
+  whineGain.gain.value = 0.015
+  whine.connect(whineFilter)
+  whineFilter.connect(whineGain)
+  whineGain.connect(layerGain)
+
+  noiseSource.start()
+  droneA.start()
+  droneB.start()
+  whine.start()
+
+  audioState.nightAmbience = {
+    initialized: true,
+    layerGain,
+    noiseFilter,
+    droneFilter,
+    droneAGain,
+    droneBGain,
+    whineGain,
+    whineFilter,
+  }
+}
+
+function updateNightAmbience(nightFactor, nowSeconds, deltaSeconds) {
+  if (!audioState.context || !audioState.ambienceBus) {
+    return
+  }
+
+  ensureNightAmbience()
+  const ambience = audioState.nightAmbience
+  if (!ambience.initialized || !ambience.layerGain) {
+    return
+  }
+
+  const nightPresence = THREE.MathUtils.smoothstep(nightFactor, 0.28, 1)
+  const isActiveRound = state.running && !state.ended
+  const activityFactor = isActiveRound ? 1 : 0.46
+  const wobble =
+    0.86 +
+    Math.sin(nowSeconds * 0.24) * 0.11 +
+    Math.sin(nowSeconds * 0.59 + 1.7) * 0.06
+  const targetLayerGain = nightPresence * activityFactor * 0.45 * wobble
+  const smoothing = Math.min(1, deltaSeconds * 3.8)
+  const smoothedGain = THREE.MathUtils.lerp(
+    ambience.layerGain.gain.value,
+    targetLayerGain,
+    smoothing
+  )
+  const currentTime = audioState.context.currentTime
+  ambience.layerGain.gain.setValueAtTime(smoothedGain, currentTime)
+
+  const noiseFrequency = THREE.MathUtils.lerp(260, 740, nightPresence) + Math.sin(nowSeconds * 0.36) * 65
+  ambience.noiseFilter.frequency.setValueAtTime(Math.max(80, noiseFrequency), currentTime)
+
+  const droneCutoff = THREE.MathUtils.lerp(210, 440, nightPresence) + Math.sin(nowSeconds * 0.17 + 0.5) * 30
+  ambience.droneFilter.frequency.setValueAtTime(Math.max(80, droneCutoff), currentTime)
+  ambience.droneAGain.gain.setValueAtTime(0.08 + nightPresence * 0.055, currentTime)
+  ambience.droneBGain.gain.setValueAtTime(0.06 + nightPresence * 0.04, currentTime)
+
+  const whinePulse =
+    0.62 + Math.pow((Math.sin(nowSeconds * 0.83 + 0.8) + 1) * 0.5, 2) * 0.88
+  const whineTarget = nightPresence * 0.028 * whinePulse
+  ambience.whineGain.gain.setValueAtTime(whineTarget, currentTime)
+  ambience.whineFilter.frequency.setValueAtTime(
+    THREE.MathUtils.lerp(620, 980, nightPresence) + Math.sin(nowSeconds * 0.49 + 0.4) * 28,
+    currentTime
+  )
 }
 
 function playTone({
@@ -427,7 +591,7 @@ function playTone({
   gain.gain.exponentialRampToValueAtTime(0.0001, now + duration + release)
 
   oscillator.connect(gain)
-  gain.connect(audioState.master)
+  gain.connect(audioState.sfxBus || audioState.master)
   oscillator.start(now)
   oscillator.stop(now + duration + release + 0.01)
 }
@@ -600,6 +764,7 @@ function updateDayNightCycle() {
   moonLightTarget.position.set(state.playerPosition.x, 0.8, state.playerPosition.z)
   moonLight.intensity = THREE.MathUtils.lerp(0.015, 0.34, nightFactor * THREE.MathUtils.clamp((moonHeight + 0.18) / 1.18, 0, 1))
   moonLight.color.copy(MOON_DAY_COLOR).lerp(MOON_NIGHT_COLOR, nightFactor)
+  updateNightAmbience(nightFactor, nowSeconds, deltaSeconds)
 
   const nightDemand = THREE.MathUtils.smoothstep(nightFactor, 0.3, 1)
   const drainRate = FLASHLIGHT_DRAIN_RATE * nightDemand
@@ -1328,6 +1493,14 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
+})
+
+window.addEventListener('pointerdown', () => {
+  ensureAudioReady()
+}, { passive: true })
+
+window.addEventListener('keydown', () => {
+  ensureAudioReady()
 })
 
 document.addEventListener('pointerlockchange', () => {
