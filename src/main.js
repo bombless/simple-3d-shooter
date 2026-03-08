@@ -82,6 +82,7 @@ const CELESTIAL_ORBIT_RADIUS = 58
 const CELESTIAL_ORBIT_TILT = 0.42
 const CELESTIAL_ORBIT_AXIS = new THREE.Vector3(0, 0, 1)
 const PEACE_EXIT_POSITION = new THREE.Vector3(30.7, 0, 30.7)
+const PEACE_EXIT_LOOK_TARGET_HEIGHT = 5.9
 const PEACE_EXIT_TRIGGER_RADIUS = 2.45
 const PEACE_SEARCHLIGHT_SWEEP_SPEED = 0.53
 const PLAYER_MAX_HP = 100
@@ -263,6 +264,19 @@ const tempEnemyEyeQuaternion = new THREE.Quaternion()
 
 function normalizeAngle(angle) {
   return Math.atan2(Math.sin(angle), Math.cos(angle))
+}
+
+function orientPlayerViewToLighthouse() {
+  const lookTarget = new THREE.Vector3(
+    PEACE_EXIT_POSITION.x,
+    PEACE_EXIT_LOOK_TARGET_HEIGHT,
+    PEACE_EXIT_POSITION.z
+  )
+  camera.position.copy(state.playerPosition)
+  camera.lookAt(lookTarget)
+  state.yaw = camera.rotation.y
+  state.pitch = THREE.MathUtils.clamp(camera.rotation.x, -1.35, 1.35)
+  camera.rotation.set(state.pitch, state.yaw, 0)
 }
 
 function updateEffectUi() {
@@ -786,8 +800,7 @@ function resetRound() {
   flashlightState.flickerMultiplier = 1
   flashlightState.lastUpdateMs = performance.now()
   state.playerPosition.set(0, PLAYER_HEIGHT, 12)
-  camera.position.copy(state.playerPosition)
-  camera.rotation.set(0, 0, 0)
+  orientPlayerViewToLighthouse()
 
   for (let i = 0; i < 6; i += 1) {
     spawnEnemy()
