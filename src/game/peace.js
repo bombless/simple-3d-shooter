@@ -37,6 +37,31 @@ function createHaloFlowTexture(THREE) {
   return texture
 }
 
+function createSearchlightBeamTexture(THREE) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 512
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    return null
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  const beamGradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
+  beamGradient.addColorStop(0, 'rgba(220, 243, 255, 0.9)')
+  beamGradient.addColorStop(0.2, 'rgba(210, 238, 255, 0.55)')
+  beamGradient.addColorStop(0.6, 'rgba(198, 232, 255, 0.2)')
+  beamGradient.addColorStop(1, 'rgba(190, 226, 255, 0.02)')
+  ctx.fillStyle = beamGradient
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.needsUpdate = true
+  texture.wrapS = THREE.ClampToEdgeWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
+  return texture
+}
+
 export function createPeaceSystem({
   THREE,
   scene,
@@ -140,6 +165,44 @@ export function createPeaceSystem({
   scene.add(spotlightTarget)
   spotlight.target = spotlightTarget
 
+  const beamTexture = createSearchlightBeamTexture(THREE)
+  const beamMaterial = new THREE.MeshBasicMaterial({
+    color: 0xd4ecff,
+    map: beamTexture,
+    transparent: true,
+    opacity: 0.34,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  beamMaterial.fog = false
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 1.6, 1, 26, 1, true), beamMaterial)
+  beam.castShadow = false
+  beam.receiveShadow = false
+  scene.add(beam)
+
+  const beamGroundMaterial = new THREE.MeshBasicMaterial({
+    color: 0xdff4ff,
+    transparent: true,
+    opacity: 0.44,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  beamGroundMaterial.fog = false
+  const beamGround = new THREE.Mesh(new THREE.CircleGeometry(1, 42), beamGroundMaterial)
+  beamGround.rotation.x = -Math.PI * 0.5
+  beamGround.position.set(exitPosition.x, 0.08, exitPosition.z)
+  beamGround.castShadow = false
+  beamGround.receiveShadow = false
+  world.add(beamGround)
+
+  const beamTip = new THREE.Vector3()
+  const beamTarget = new THREE.Vector3()
+  const beamDirection = new THREE.Vector3()
+  const beamMidpoint = new THREE.Vector3()
+  const beamUp = new THREE.Vector3(0, 1, 0)
+
   const zoneMaterial = new THREE.MeshBasicMaterial({
     color: 0x9dd7ff,
     transparent: true,
@@ -161,9 +224,10 @@ export function createPeaceSystem({
     spotlightTarget.position.set(targetX, 0.15, targetZ)
 
     lighthouse.rotation.y = Math.sin(nowSeconds * 0.14) * 0.035
-    spotlight.intensity = THREE.MathUtils.lerp(1.1, 3.6, nightFactor)
-    spotlight.distance = THREE.MathUtils.lerp(23, 36, nightFactor)
-    spotlight.angle = THREE.MathUtils.lerp(Math.PI / 8.4, Math.PI / 6.1, nightFactor)
+    spotlight.intensity = THREE.MathUtils.lerp(2.6, 6.8, nightFactor)
+    spotlight.distance = THREE.MathUtils.lerp(30, 44, nightFactor)
+    spotlight.angle = THREE.MathUtils.lerp(Math.PI / 8, Math.PI / 5.6, nightFactor)
+    spotlight.penumbra = THREE.MathUtils.lerp(0.48, 0.76, nightFactor)
 
     const pulse =
       0.75 + Math.sin(nowSeconds * 2.3) * 0.17 + Math.sin(nowSeconds * 3.8 + 0.6) * 0.08
@@ -183,6 +247,32 @@ export function createPeaceSystem({
     }
 
     haloLight.intensity = THREE.MathUtils.lerp(2.1, 3.9, nightFactor) * haloPulse
+
+    spotlight.getWorldPosition(beamTip)
+    spotlightTarget.getWorldPosition(beamTarget)
+    beamDirection.subVectors(beamTip, beamTarget)
+    const beamLength = THREE.MathUtils.clamp(beamDirection.length(), 4, 42)
+    if (beamDirection.lengthSq() > 0.0001) {
+      beamDirection.normalize()
+      beamMidpoint.copy(beamTip).add(beamTarget).multiplyScalar(0.5)
+      beam.position.copy(beamMidpoint)
+      beam.quaternion.setFromUnitVectors(beamUp, beamDirection)
+      beam.scale.set(1, beamLength, 1)
+      beamMaterial.opacity = THREE.MathUtils.clamp(
+        0.2 + nightFactor * 0.3 + Math.sin(nowSeconds * 2.1) * 0.03,
+        0.16,
+        0.56
+      )
+    }
+
+    const groundRadius = THREE.MathUtils.clamp(Math.tan(spotlight.angle) * beamLength * 0.86, 1.3, 8.8)
+    beamGround.position.set(beamTarget.x, 0.08, beamTarget.z)
+    beamGround.scale.set(groundRadius, groundRadius * 0.82, 1)
+    beamGroundMaterial.opacity = THREE.MathUtils.clamp(
+      0.26 + nightFactor * 0.35 + Math.sin(nowSeconds * 2.4 + 0.6) * 0.05,
+      0.22,
+      0.72
+    )
   }
 
   function checkPeacefulWinCondition(playerPosition) {
