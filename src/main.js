@@ -247,26 +247,23 @@ function applyPlayerDamage(amount) {
 }
 
 function spawnEnemyForCurrentLevel() {
-  const activeLevel = getActiveLevelSystem()
-  const spawnData = activeLevel.getEnemySpawnPoint(CONSTANTS.ENEMY_BASE_HEIGHT)
-  const enemy = spawnEnemy(world, enemies, {
-    spawnPosition: spawnData.position,
-  })
-
   if (state.currentLevelIndex === 1) {
-    enemy.platformIndex = spawnData.platformIndex
-    lavaLevel.constrainEnemyToPlatform(enemy, CONSTANTS.ENEMY_BASE_HEIGHT)
-  }
-}
-
-function keepEnemiesOnPlatforms() {
-  if (state.currentLevelIndex !== 1) {
+    const angle = Math.random() * Math.PI * 2
+    const radius = THREE.MathUtils.randFloat(19, 30)
+    const spawnPosition = new THREE.Vector3(
+      Math.cos(angle) * radius,
+      CONSTANTS.ENEMY_BASE_HEIGHT,
+      Math.sin(angle) * radius
+    )
+    spawnEnemy(world, enemies, { spawnPosition })
     return
   }
 
-  for (const enemy of enemies) {
-    lavaLevel.constrainEnemyToPlatform(enemy, CONSTANTS.ENEMY_BASE_HEIGHT)
-  }
+  const activeLevel = getActiveLevelSystem()
+  const spawnData = activeLevel.getEnemySpawnPoint(CONSTANTS.ENEMY_BASE_HEIGHT)
+  spawnEnemy(world, enemies, {
+    spawnPosition: spawnData.position,
+  })
 }
 
 const audioController = createAudioController({
@@ -561,9 +558,6 @@ function updateRoundState(delta) {
 
   if (state.currentLevelIndex === 1) {
     lavaLevel.applyPlatformCarryToPlayer(state, CONSTANTS.PLAYER_HEIGHT)
-    for (const enemy of enemies) {
-      lavaLevel.applyPlatformCarryToEnemy(enemy)
-    }
   }
 
   processInput(delta)
@@ -582,7 +576,6 @@ function updateRoundState(delta) {
     return
   }
 
-  keepEnemiesOnPlatforms()
   updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
 }
 
