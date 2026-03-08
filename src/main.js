@@ -284,13 +284,37 @@ function applyPlayerDamage(amount) {
 
 function spawnEnemyForCurrentLevel() {
   if (state.currentLevelIndex === 1) {
-    const angle = Math.random() * Math.PI * 2
-    const radius = THREE.MathUtils.randFloat(19, 30)
-    const spawnPosition = new THREE.Vector3(
-      Math.cos(angle) * radius,
-      CONSTANTS.ENEMY_BASE_HEIGHT,
-      Math.sin(angle) * radius
-    )
+    const safeRadiusSq = CONSTANTS.LAVA_PEACE_ENEMY_SPAWN_SAFE_RADIUS ** 2
+    const exitPosition = CONSTANTS.LAVA_PEACE_EXIT_POSITION
+    let spawnPosition = null
+
+    for (let attempt = 0; attempt < 28; attempt += 1) {
+      const angle = Math.random() * Math.PI * 2
+      const radius = THREE.MathUtils.randFloat(19, 30)
+      const candidate = new THREE.Vector3(
+        Math.cos(angle) * radius,
+        CONSTANTS.ENEMY_BASE_HEIGHT,
+        Math.sin(angle) * radius
+      )
+
+      const dx = candidate.x - exitPosition.x
+      const dz = candidate.z - exitPosition.z
+      if (dx * dx + dz * dz >= safeRadiusSq) {
+        spawnPosition = candidate
+        break
+      }
+    }
+
+    if (!spawnPosition) {
+      const retreatDirection = new THREE.Vector2(-exitPosition.x, -exitPosition.z).normalize()
+      const fallbackRadius = THREE.MathUtils.randFloat(24, 29)
+      spawnPosition = new THREE.Vector3(
+        retreatDirection.x * fallbackRadius + THREE.MathUtils.randFloatSpread(2.4),
+        CONSTANTS.ENEMY_BASE_HEIGHT,
+        retreatDirection.y * fallbackRadius + THREE.MathUtils.randFloatSpread(2.4)
+      )
+    }
+
     spawnEnemy(world, enemies, { spawnPosition })
     return
   }
