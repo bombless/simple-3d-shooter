@@ -20,6 +20,18 @@ const statsEl = document.querySelector('#stats')
 const messageEl = document.querySelector('#message')
 const startBtn = document.querySelector('#start-btn')
 
+const DAY_NIGHT_CYCLE_SECONDS = 50
+const SKY_DAY_COLOR = new THREE.Color(0x89b2ff)
+const SKY_NIGHT_COLOR = new THREE.Color(0x03050a)
+const FOG_DAY_COLOR = new THREE.Color(0x89b2ff)
+const FOG_NIGHT_COLOR = new THREE.Color(0x010203)
+const SUN_DAY_COLOR = new THREE.Color(0xffffff)
+const SUN_NIGHT_COLOR = new THREE.Color(0x4d5e8c)
+const dayNightState = {
+  startedAtMs: performance.now(),
+  dayFactor: 0,
+}
+
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -27,20 +39,30 @@ renderer.shadowMap.enabled = true
 app.appendChild(renderer.domElement)
 
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x89b2ff)
-scene.fog = new THREE.Fog(0x89b2ff, 35, 80)
+scene.background = SKY_NIGHT_COLOR.clone()
+scene.fog = new THREE.Fog(FOG_NIGHT_COLOR.getHex(), 0.45, 8.5)
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 200)
 camera.rotation.order = 'YXZ'
+scene.add(camera)
 
-const hemiLight = new THREE.HemisphereLight(0xdff3ff, 0x28334e, 0.6)
+const hemiLight = new THREE.HemisphereLight(0xdff3ff, 0x28334e, 0.01)
 scene.add(hemiLight)
 
-const sunLight = new THREE.DirectionalLight(0xffffff, 1.2)
+const sunLight = new THREE.DirectionalLight(0xffffff, 0.02)
 sunLight.position.set(10, 18, 7)
 sunLight.castShadow = true
 sunLight.shadow.mapSize.set(1024, 1024)
 scene.add(sunLight)
+
+const flashlight = new THREE.SpotLight(0xeef4ff, 0, 11.5, Math.PI / 11.5, 0.72, 1.45)
+flashlight.position.set(0, -0.06, 0)
+flashlight.castShadow = false
+const flashlightTarget = new THREE.Object3D()
+flashlightTarget.position.set(0, -0.14, -6.4)
+camera.add(flashlight)
+camera.add(flashlightTarget)
+flashlight.target = flashlightTarget
 
 const world = new THREE.Group()
 scene.add(world)
@@ -315,6 +337,29 @@ function applyCameraShake(delta) {
   camera.position.z += shakeZ
 
   state.shakeAmount = Math.max(0, state.shakeAmount - CAMERA_SHAKE_DECAY * delta)
+}
+
+function updateDayNightCycle() {
+  const elapsedSeconds = (performance.now() - dayNightState.startedAtMs) / 1000
+  const cycleProgress = (elapsedSeconds % DAY_NIGHT_CYCLE_SECONDS) / DAY_NIGHT_CYCLE_SECONDS
+  const dayFactor = (1 - Math.cos(cycleProgress * Math.PI * 2)) * 0.5
+  dayNightState.dayFactor = dayFactor
+
+  scene.background.copy(SKY_NIGHT_COLOR).lerp(SKY_DAY_COLOR, dayFactor)
+  scene.fog.color.copy(FOG_NIGHT_COLOR).lerp(FOG_DAY_COLOR, dayFactor)
+  scene.fog.near = THREE.MathUtils.lerp(0.45, 35, dayFactor)
+  scene.fog.far = THREE.MathUtils.lerp(8.5, 80, dayFactor)
+
+  hemiLight.intensity = THREE.MathUtils.lerp(0.008, 0.6, dayFactor)
+  sunLight.intensity = THREE.MathUtils.lerp(0.02, 1.2, dayFactor)
+  sunLight.color.copy(SUN_NIGHT_COLOR).lerp(SUN_DAY_COLOR, dayFactor)
+
+  flashlight.intensity = THREE.MathUtils.lerp(5.8, 0, Math.pow(dayFactor, 1.35))
+  flashlight.distance = THREE.MathUtils.lerp(10.8, 2.5, dayFactor)
+  flashlight.angle = THREE.MathUtils.lerp(Math.PI / 12.2, Math.PI / 7.2, dayFactor)
+  flashlight.penumbra = THREE.MathUtils.lerp(0.75, 0.25, dayFactor)
+  flashlight.decay = THREE.MathUtils.lerp(1.35, 1.6, dayFactor)
+  flashlightTarget.position.set(0, -THREE.MathUtils.lerp(0.14, 0.05, dayFactor), -THREE.MathUtils.lerp(6.4, 3.4, dayFactor))
 }
 
 function spawnEnemy() {
@@ -694,7 +739,8 @@ function endRound(victory, reason) {
 }
 
 function updateHud() {
-  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))}`
+  const phaseLabel = dayNightState.dayFactor < 0.35 ? 'NIGHT' : dayNightState.dayFactor < 0.65 ? 'DUSK' : 'DAY'
+  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel}`
 }
 
 function handleShoot() {
@@ -966,6 +1012,7 @@ startBtn.addEventListener('click', beginRound)
 
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
+  updateDayNightCycle()
   updateRoundState(delta)
   updateBloodBursts(delta)
   applyCameraShake(delta)
@@ -973,5 +1020,6 @@ function animate() {
   requestAnimationFrame(animate)
 }
 
+updateDayNightCycle()
 resetRound()
 animate()
