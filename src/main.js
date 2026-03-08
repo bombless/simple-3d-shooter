@@ -8,6 +8,7 @@ import { createLavaLevel } from './game/lavaLevel'
 import { processPlayerInput } from './game/playerMovement'
 import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
 import { spawnBloodBurst, clearBloodBursts, updateBloodBursts } from './game/blood'
+import { spawnHitRing, clearHitRings, updateHitRings } from './game/hitRing'
 import { updateDamageOverlay, updateHud } from './game/ui'
 import { createFlashlightCookieTexture, addCameraShake, applyCameraShake } from './game/utils'
 import * as CONSTANTS from './game/constants'
@@ -186,6 +187,7 @@ const state = {
 
 const enemies = []
 const bloodBursts = []
+const hitRings = []
 
 function getActiveLevelMeta() {
   return LEVELS[state.currentLevelIndex]
@@ -332,6 +334,7 @@ const { updateDayNightCycle } = createDayNightController({
 function resetRound() {
   clearEnemies(world, enemies)
   clearBloodBursts(world, bloodBursts)
+  clearHitRings(world, hitRings)
   state.running = false
   state.ended = false
   state.hp = CONSTANTS.PLAYER_MAX_HP
@@ -460,7 +463,6 @@ function handleShoot() {
   }
 
   playShotSfx()
-  addCameraShake(state, 0.055)
   state.fireCooldown = 0.14
   raycaster.setFromCamera(pointer, camera)
 
@@ -472,8 +474,8 @@ function handleShoot() {
 
   const firstHit = intersections[0]
   spawnBloodBurst(world, bloodBursts, firstHit.point, raycaster.ray.direction)
+  spawnHitRing(world, hitRings, firstHit.point, raycaster.ray.direction)
   playHitSfx()
-  addCameraShake(state, 0.18)
 
   const targetMesh = firstHit.object.userData.enemyMesh || firstHit.object.parent
   const index = enemies.findIndex((enemy) => enemy.mesh === targetMesh)
@@ -670,6 +672,7 @@ function animate() {
   peaceSystem.updatePeaceLighthouse()
   updateRoundState(delta)
   updateBloodBursts(world, bloodBursts, delta)
+  updateHitRings(world, hitRings, camera, delta)
   updateDamageOverlay(state, delta, damageOverlayEl)
   applyCameraShake(state, camera, delta, CONSTANTS.CAMERA_SHAKE_DECAY)
   renderer.render(scene, camera)
