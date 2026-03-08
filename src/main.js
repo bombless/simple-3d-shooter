@@ -5,7 +5,7 @@ const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 角落灯塔可和平胜利 | Esc 暂停 | R 重开</div>
     <div id="fx-controls">
       <button id="fx-dec" type="button" aria-label="降低效果强度">-</button>
       <span id="fx-label">FX 1.0x</span>
@@ -30,7 +30,7 @@ app.innerHTML = `
   <div id="message" class="visible">
     <h1>Cube Strike</h1>
     <p>单机 3D 生存射击</p>
-    <p class="sub">点击屏幕开始，存活 90 秒或击败 20 个敌人即可胜利。</p>
+    <p class="sub">点击屏幕开始，存活 90 秒、击败 20 个敌人，或前往角落灯塔和平撤离即可胜利。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -77,6 +77,9 @@ const flashlightState = {
 const CELESTIAL_ORBIT_RADIUS = 58
 const CELESTIAL_ORBIT_TILT = 0.42
 const CELESTIAL_ORBIT_AXIS = new THREE.Vector3(0, 0, 1)
+const PEACE_EXIT_POSITION = new THREE.Vector3(30.7, 0, 30.7)
+const PEACE_EXIT_TRIGGER_RADIUS = 2.45
+const PEACE_SEARCHLIGHT_SWEEP_SPEED = 0.53
 const PLAYER_MAX_HP = 100
 const DAMAGE_FLASH_DECAY = 1.12
 const AUDIO_MASTER_GAIN = 0.42
@@ -169,11 +172,18 @@ for (let i = 0; i < 22; i += 1) {
   const height = THREE.MathUtils.randFloat(1, 4)
   const depth = THREE.MathUtils.randFloat(1.5, 3.5)
   const block = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), obstacleMaterial)
-  block.position.set(
-    THREE.MathUtils.randFloatSpread(58),
-    height / 2,
-    THREE.MathUtils.randFloatSpread(58)
+  let x = 0
+  let z = 0
+  let attempts = 0
+  do {
+    x = THREE.MathUtils.randFloatSpread(58)
+    z = THREE.MathUtils.randFloatSpread(58)
+    attempts += 1
+  } while (
+    attempts < 40 &&
+    (x - PEACE_EXIT_POSITION.x) ** 2 + (z - PEACE_EXIT_POSITION.z) ** 2 < 46
   )
+  block.position.set(x, height / 2, z)
   block.castShadow = true
   block.receiveShadow = true
   world.add(block)
@@ -181,24 +191,93 @@ for (let i = 0; i < 22; i += 1) {
 }
 
 const boundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
-const boundaryGeometries = [
-  new THREE.BoxGeometry(2, 3, 70),
-  new THREE.BoxGeometry(2, 3, 70),
-  new THREE.BoxGeometry(70, 3, 2),
-  new THREE.BoxGeometry(70, 3, 2),
+const boundarySegments = [
+  { width: 2, height: 3, depth: 70, position: new THREE.Vector3(-35, 1.5, 0) },
+  { width: 2, height: 3, depth: 62, position: new THREE.Vector3(35, 1.5, -4) },
+  { width: 70, height: 3, depth: 2, position: new THREE.Vector3(0, 1.5, -35) },
+  { width: 62, height: 3, depth: 2, position: new THREE.Vector3(-4, 1.5, 35) },
 ]
-const boundaryPositions = [
-  new THREE.Vector3(-35, 1.5, 0),
-  new THREE.Vector3(35, 1.5, 0),
-  new THREE.Vector3(0, 1.5, -35),
-  new THREE.Vector3(0, 1.5, 35),
-]
-for (let i = 0; i < boundaryGeometries.length; i += 1) {
-  const wall = new THREE.Mesh(boundaryGeometries[i], boundaryMaterial)
-  wall.position.copy(boundaryPositions[i])
+for (const segment of boundarySegments) {
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(segment.width, segment.height, segment.depth),
+    boundaryMaterial
+  )
+  wall.position.copy(segment.position)
   wall.castShadow = true
   wall.receiveShadow = true
   world.add(wall)
+}
+
+const lighthouse = new THREE.Group()
+lighthouse.position.set(PEACE_EXIT_POSITION.x, 0, PEACE_EXIT_POSITION.z)
+world.add(lighthouse)
+
+const lighthouseBody = new THREE.Mesh(
+  new THREE.CylinderGeometry(1.12, 1.3, 5.2, 18),
+  new THREE.MeshStandardMaterial({
+    color: 0xd6d8de,
+    roughness: 0.84,
+    metalness: 0.12,
+  })
+)
+lighthouseBody.position.y = 2.6
+lighthouseBody.castShadow = true
+lighthouseBody.receiveShadow = true
+lighthouse.add(lighthouseBody)
+
+const lighthouseTop = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.86, 0.96, 1.5, 16),
+  new THREE.MeshStandardMaterial({
+    color: 0x505d72,
+    roughness: 0.5,
+    metalness: 0.32,
+  })
+)
+lighthouseTop.position.y = 5.95
+lighthouseTop.castShadow = true
+lighthouseTop.receiveShadow = true
+lighthouse.add(lighthouseTop)
+
+const beaconGlowMaterial = new THREE.MeshStandardMaterial({
+  color: 0xd5edff,
+  emissive: 0x5ab6ff,
+  emissiveIntensity: 1.08,
+  roughness: 0.2,
+  metalness: 0.06,
+})
+const beaconGlow = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), beaconGlowMaterial)
+beaconGlow.position.y = 6.55
+beaconGlow.castShadow = false
+beaconGlow.receiveShadow = false
+lighthouse.add(beaconGlow)
+
+const peaceSpotlight = new THREE.SpotLight(0xeaf6ff, 2.2, 32, Math.PI / 7.2, 0.56, 1.08)
+peaceSpotlight.position.set(0, 6.5, 0)
+peaceSpotlight.castShadow = false
+lighthouse.add(peaceSpotlight)
+
+const peaceSpotlightTarget = new THREE.Object3D()
+peaceSpotlightTarget.position.set(PEACE_EXIT_POSITION.x - 7.8, 0.15, PEACE_EXIT_POSITION.z - 2.4)
+scene.add(peaceSpotlightTarget)
+peaceSpotlight.target = peaceSpotlightTarget
+
+const peaceZoneMaterial = new THREE.MeshBasicMaterial({
+  color: 0x9dd7ff,
+  transparent: true,
+  opacity: 0.36,
+})
+const peaceZoneRing = new THREE.Mesh(new THREE.RingGeometry(1.38, 2.55, 48), peaceZoneMaterial)
+peaceZoneRing.position.set(PEACE_EXIT_POSITION.x, 0.05, PEACE_EXIT_POSITION.z)
+peaceZoneRing.rotation.x = -Math.PI / 2
+world.add(peaceZoneRing)
+
+const peaceState = {
+  lighthouse,
+  spotlight: peaceSpotlight,
+  spotlightTarget: peaceSpotlightTarget,
+  zoneMaterial: peaceZoneMaterial,
+  zoneRing: peaceZoneRing,
+  beaconGlowMaterial,
 }
 
 const pointer = new THREE.Vector2(0, 0)
@@ -886,6 +965,34 @@ function updateDayNightCycle() {
   )
 }
 
+function updatePeaceLighthouse() {
+  const nowSeconds = performance.now() * 0.001
+  const nightFactor = 1 - dayNightState.dayFactor
+  const sweepAngle = nowSeconds * PEACE_SEARCHLIGHT_SWEEP_SPEED
+  const sweepRadius = 10.8
+  const targetX = PEACE_EXIT_POSITION.x - 0.5 + Math.cos(sweepAngle) * sweepRadius
+  const targetZ =
+    PEACE_EXIT_POSITION.z - 0.4 +
+    Math.sin(sweepAngle * 0.78 + 1.2) * sweepRadius * 0.72
+  peaceState.spotlightTarget.position.set(targetX, 0.15, targetZ)
+
+  peaceState.lighthouse.rotation.y = Math.sin(nowSeconds * 0.14) * 0.035
+  peaceState.spotlight.intensity = THREE.MathUtils.lerp(1.1, 3.6, nightFactor)
+  peaceState.spotlight.distance = THREE.MathUtils.lerp(23, 36, nightFactor)
+  peaceState.spotlight.angle = THREE.MathUtils.lerp(Math.PI / 8.4, Math.PI / 6.1, nightFactor)
+
+  const pulse = 0.75 + Math.sin(nowSeconds * 2.3) * 0.17 + Math.sin(nowSeconds * 3.8 + 0.6) * 0.08
+  peaceState.zoneMaterial.opacity = THREE.MathUtils.clamp(0.16 + nightFactor * 0.12 + pulse * 0.2, 0.12, 0.74)
+  peaceState.beaconGlowMaterial.emissiveIntensity =
+    THREE.MathUtils.lerp(0.8, 1.95, nightFactor) * (0.88 + Math.sin(nowSeconds * 1.8 + 0.4) * 0.12)
+}
+
+function checkPeacefulWinCondition() {
+  const dx = state.playerPosition.x - PEACE_EXIT_POSITION.x
+  const dz = state.playerPosition.z - PEACE_EXIT_POSITION.z
+  return dx * dx + dz * dz <= PEACE_EXIT_TRIGGER_RADIUS * PEACE_EXIT_TRIGGER_RADIUS
+}
+
 function spawnEnemy() {
   const mesh = new THREE.Group()
   mesh.position.copy(randomSpawn())
@@ -1542,6 +1649,10 @@ function updateRoundState(delta) {
   }
 
   processInput(delta)
+  if (checkPeacefulWinCondition()) {
+    endRound(true, '你抵达了角落灯塔，成功和平撤离')
+    return
+  }
   updateEnemies(delta)
   updateHud()
 }
@@ -1637,6 +1748,7 @@ fxIncBtn.addEventListener('click', () => adjustFlashlightEffectIntensity(FLASHLI
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateDayNightCycle()
+  updatePeaceLighthouse()
   updateRoundState(delta)
   updateBloodBursts(delta)
   updateDamageOverlay(delta)
