@@ -55,7 +55,9 @@ export function createBleedLevel({ THREE, world }) {
     accentColor: 0xffd9b1,
     glowColor: 0xffb982,
   })
-  dayBeacon.group.position.set(0, 0, -24)
+  const dayBeaconPosition = new THREE.Vector3(0, 0, -24)
+  const dayBeaconTriggerRadius = 3.4
+  dayBeacon.group.position.copy(dayBeaconPosition)
   root.add(dayBeacon.group)
 
   function setActive(active) {
@@ -89,6 +91,13 @@ export function createBleedLevel({ THREE, world }) {
     return new THREE.Vector3(0, 1.8, 0)
   }
 
+  function getDayBeaconInfo() {
+    return {
+      position: dayBeaconPosition,
+      triggerRadius: dayBeaconTriggerRadius,
+    }
+  }
+
   return {
     colliders,
     setActive,
@@ -96,5 +105,6 @@ export function createBleedLevel({ THREE, world }) {
     getEnemySpawnPoint,
     getPlayerSpawnPoint,
     getPlayerLookTarget,
+    getDayBeaconInfo,
   }
 }

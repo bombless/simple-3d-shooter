@@ -90,7 +90,9 @@ export function createShadowPillarLevel({ THREE, world }) {
     accentColor: 0xf4f6ff,
     glowColor: 0xfff0b1,
   })
-  dayBeacon.group.position.set(23.5, 0, -23.5)
+  const dayBeaconPosition = new THREE.Vector3(23.5, 0, -23.5)
+  const dayBeaconTriggerRadius = 3.6
+  dayBeacon.group.position.copy(dayBeaconPosition)
   dayBeacon.group.traverse((node) => {
     if (node.isMesh) {
       // Keep sunlight shadow gameplay unchanged.
@@ -149,6 +151,13 @@ export function createShadowPillarLevel({ THREE, world }) {
     return new THREE.Vector3(5, 2, -2)
   }
 
+  function getDayBeaconInfo() {
+    return {
+      position: dayBeaconPosition,
+      triggerRadius: dayBeaconTriggerRadius,
+    }
+  }
+
   return {
     colliders,
     setActive,
@@ -157,5 +166,6 @@ export function createShadowPillarLevel({ THREE, world }) {
     getPlayerSpawnPoint,
     getPlayerLookTarget,
     isPlayerInShadow,
+    getDayBeaconInfo,
   }
 }

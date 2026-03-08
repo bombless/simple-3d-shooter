@@ -66,6 +66,8 @@ const MOBILE_TAP_MAX_DURATION_MS = 240
 const MOBILE_DOUBLE_TAP_WINDOW_MS = 260
 const MOBILE_DOUBLE_TAP_RANGE_PX = 42
 const MOBILE_COMBO_IDLE_EXIT_MS = 500
+const DAY_BEACON_CRYSTALIZE_INTERVAL_SECONDS = 0.55
+const DAY_BEACON_CRYSTAL_DEATH_DELAY_SECONDS = 1.05
 const COLOR_TRIAL_PROFILES = [
   { key: 'blue', label: '蓝', enemyColor: 0x2f7cf5, enemyEmissive: 0x15398f, pillarColor: 0x2e7ef2 },
   { key: 'red', label: '红', enemyColor: 0xe94343, enemyEmissive: 0x7a1f1f, pillarColor: 0xe34848 },
@@ -269,6 +271,8 @@ const state = {
   colorCurseKey: null,
   colorCurseLabel: '白',
   colorCurseDamageAccumulator: 0,
+  dayBeaconRitualActive: false,
+  dayBeaconRitualAccumulator: 0,
   lastTrailPosition: new THREE.Vector3(0, CONSTANTS.PLAYER_HEIGHT, 12),
   currentLevelIndex: 0,
   levelLabel: LEVELS[0].label,
@@ -332,9 +336,41 @@ const playerStatusLight = new THREE.PointLight(0xffffff, 0.38, 5.8, 2.25)
 playerStatusLight.position.set(0, 1.2, 0)
 world.add(playerStatusLight)
 
+const dayBeaconLaserMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffdd92,
+  transparent: true,
+  opacity: 0.72,
+  depthWrite: false,
+})
+dayBeaconLaserMaterial.fog = false
+const dayBeaconLaserBeam = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.28, 0.72, 42, 18, 1, true),
+  dayBeaconLaserMaterial
+)
+dayBeaconLaserBeam.visible = false
+world.add(dayBeaconLaserBeam)
+
+const dayBeaconLaserHaloMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffcc7d,
+  transparent: true,
+  opacity: 0.4,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+})
+dayBeaconLaserHaloMaterial.fog = false
+const dayBeaconLaserHalo = new THREE.Mesh(new THREE.RingGeometry(1.3, 3.4, 52), dayBeaconLaserHaloMaterial)
+dayBeaconLaserHalo.rotation.x = -Math.PI / 2
+dayBeaconLaserHalo.visible = false
+world.add(dayBeaconLaserHalo)
+
+const dayBeaconLaserLight = new THREE.PointLight(0xffd899, 0, 15, 2.1)
+dayBeaconLaserLight.visible = false
+world.add(dayBeaconLaserLight)
+
 const tempPackSpawnVector = new THREE.Vector3()
 const tempPackSpacingVector = new THREE.Vector3()
 const tempBubbleVelocity = new THREE.Vector3()
+const crystalScaleTarget = new THREE.Vector3(0.82, 1.15, 0.82)
 
 for (let i = 0; i < CONSTANTS.BLEED_HEALTH_PACK_COUNT; i += 1) {
   const mesh = new THREE.Group()
@@ -575,6 +611,193 @@ function applyColorCurseFromEnemy(enemy) {
   state.colorCurseDamageAccumulator = 0
 }
 
+function resetDayBeaconRitualState() {
+  state.dayBeaconRitualActive = false
+  state.dayBeaconRitualAccumulator = 0
+  dayBeaconLaserBeam.visible = false
+  dayBeaconLaserHalo.visible = false
+  dayBeaconLaserLight.visible = false
+  dayBeaconLaserLight.intensity = 0
+}
+
+function getActiveDayBeaconInfo() {
+  if (state.currentLevelIndex === 2) {
+    return bleedLevel.getDayBeaconInfo()
+  }
+  if (state.currentLevelIndex === 3) {
+    return shadowLevel.getDayBeaconInfo()
+  }
+  return null
+}
+
+function updateDayBeaconLaser(delta, beaconInfo) {
+  const isActive = Boolean(beaconInfo && state.dayBeaconRitualActive)
+  dayBeaconLaserBeam.visible = isActive
+  dayBeaconLaserHalo.visible = isActive
+  dayBeaconLaserLight.visible = isActive
+
+  if (!isActive) {
+    dayBeaconLaserLight.intensity = 0
+    return
+  }
+
+  const now = performance.now() * 0.001
+  const pulse = 0.6 + Math.sin(now * 9.5) * 0.22
+  const beamHeight = 42
+  const beamTopY = 45
+  dayBeaconLaserBeam.position.set(
+    beaconInfo.position.x,
+    beamTopY - beamHeight * 0.5,
+    beaconInfo.position.z
+  )
+  dayBeaconLaserHalo.position.set(beaconInfo.position.x, 0.05, beaconInfo.position.z)
+  dayBeaconLaserLight.position.set(beaconInfo.position.x, 4.2, beaconInfo.position.z)
+  dayBeaconLaserBeam.scale.x = 0.95 + pulse * 0.36
+  dayBeaconLaserBeam.scale.z = 0.95 + pulse * 0.36
+  dayBeaconLaserMaterial.opacity = THREE.MathUtils.lerp(
+    dayBeaconLaserMaterial.opacity,
+    0.52 + Math.max(0, pulse) * 0.4,
+    0.2 + delta * 5
+  )
+  dayBeaconLaserHaloMaterial.opacity = THREE.MathUtils.lerp(
+    dayBeaconLaserHaloMaterial.opacity,
+    0.24 + Math.max(0, pulse) * 0.35,
+    0.24 + delta * 5
+  )
+  dayBeaconLaserHalo.rotation.z += delta * 0.9
+  dayBeaconLaserLight.intensity = THREE.MathUtils.lerp(
+    dayBeaconLaserLight.intensity,
+    1.8 + Math.max(0, pulse) * 1.8,
+    0.18 + delta * 5
+  )
+}
+
+function crystallizeEnemy(enemy) {
+  if (!enemy || enemy.crystallized) {
+    return
+  }
+
+  enemy.crystallized = true
+  enemy.crystalTimer = DAY_BEACON_CRYSTAL_DEATH_DELAY_SECONDS
+  enemy.speed = 0
+  enemy.damageCooldown = Number.POSITIVE_INFINITY
+  enemy.corePulseSpeed = 0
+  for (const organ of enemy.organs) {
+    organ.pulseAmplitude = 0
+    organ.pulseSpeed = 0
+  }
+  for (const eye of enemy.eyes) {
+    eye.pulseSpeed = 0
+    eye.wanderAmplitude = 0
+  }
+  for (const tentacle of enemy.tentacles) {
+    tentacle.swaySpeed = 0
+    tentacle.swayAmplitude = 0
+  }
+
+  enemy.mesh.traverse((node) => {
+    if (!node.isMesh || !node.material) {
+      return
+    }
+
+    if (Array.isArray(node.material)) {
+      for (const material of node.material) {
+        if (material.visible === false) {
+          continue
+        }
+        if (material.color) {
+          material.color.setHex(0x8b6d46)
+        }
+        if (material.emissive) {
+          material.emissive.setHex(0x2e2015)
+          material.emissiveIntensity = 0.28
+        }
+        if (typeof material.roughness === 'number') {
+          material.roughness = 0.24
+        }
+        if (typeof material.metalness === 'number') {
+          material.metalness = 0.62
+        }
+      }
+      return
+    }
+
+    if (node.material.visible === false) {
+      return
+    }
+    if (node.material.color) {
+      node.material.color.setHex(0x8b6d46)
+    }
+    if (node.material.emissive) {
+      node.material.emissive.setHex(0x2e2015)
+      node.material.emissiveIntensity = 0.28
+    }
+    if (typeof node.material.roughness === 'number') {
+      node.material.roughness = 0.24
+    }
+    if (typeof node.material.metalness === 'number') {
+      node.material.metalness = 0.62
+    }
+  })
+}
+
+function updateDayBeaconRitual(delta) {
+  const beaconInfo = getActiveDayBeaconInfo()
+  if (!beaconInfo) {
+    resetDayBeaconRitualState()
+    updateDayBeaconLaser(delta, null)
+    return
+  }
+
+  if (!state.dayBeaconRitualActive) {
+    const dx = state.playerPosition.x - beaconInfo.position.x
+    const dz = state.playerPosition.z - beaconInfo.position.z
+    if (dx * dx + dz * dz <= beaconInfo.triggerRadius ** 2) {
+      state.dayBeaconRitualActive = true
+      state.dayBeaconRitualAccumulator = 0
+    }
+  }
+
+  updateDayBeaconLaser(delta, beaconInfo)
+  if (!state.dayBeaconRitualActive) {
+    return
+  }
+
+  state.dayBeaconRitualAccumulator += delta
+  while (state.dayBeaconRitualAccumulator >= DAY_BEACON_CRYSTALIZE_INTERVAL_SECONDS) {
+    state.dayBeaconRitualAccumulator -= DAY_BEACON_CRYSTALIZE_INTERVAL_SECONDS
+    const candidates = enemies.filter((enemy) => !enemy.crystallized)
+    if (candidates.length === 0) {
+      break
+    }
+    const target = candidates[THREE.MathUtils.randInt(0, candidates.length - 1)]
+    crystallizeEnemy(target)
+  }
+
+  for (let index = enemies.length - 1; index >= 0; index -= 1) {
+    const enemy = enemies[index]
+    if (!enemy.crystallized) {
+      continue
+    }
+
+    enemy.crystalTimer -= delta
+    enemy.mesh.rotation.y += delta * 1.7
+    enemy.mesh.scale.lerp(crystalScaleTarget, 0.08 + delta * 2.2)
+
+    if (enemy.crystalTimer > 0) {
+      continue
+    }
+
+    enemies.splice(index, 1)
+    removeEnemy(world, enemy)
+    state.score += 1
+    if (state.score >= state.enemyGoal) {
+      endRound(true, `信标净化完成，结晶敌人数量达到 ${state.enemyGoal}`)
+      return
+    }
+  }
+}
+
 function setLevel(index) {
   const previousLevelIndex = state.currentLevelIndex
   state.currentLevelIndex = THREE.MathUtils.clamp(index, 0, LEVELS.length - 1)
@@ -601,6 +824,7 @@ function setLevel(index) {
   if (previousLevelIndex !== state.currentLevelIndex) {
     resetBleedLevelObjects()
     clearColorCurseState()
+    resetDayBeaconRitualState()
   }
 
   if (!isFixedDayLevel()) {
@@ -1130,6 +1354,7 @@ function resetRound() {
   clearPendingMobileTap()
   clearMobileComboMode()
   clearColorCurseState()
+  resetDayBeaconRitualState()
   flashlightState.battery = 1
   flashlightState.flickerTimeLeft = 0
   flashlightState.flickerMultiplier = 1
@@ -1205,6 +1430,7 @@ function endRound(victory, reason) {
   state.mobileJumpQueued = false
   clearPendingMobileTap()
   clearMobileComboMode()
+  resetDayBeaconRitualState()
   pauseRound()
   state.ended = true
   document.exitPointerLock()
@@ -1387,6 +1613,7 @@ function updateRoundState(delta) {
   updateBleedLevelMechanics(delta)
   updateShadowSunDamage(delta)
   updateColorTrialMechanics(delta)
+  updateDayBeaconRitual(delta)
   if (state.ended) {
     return
   }
