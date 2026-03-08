@@ -108,6 +108,7 @@ const PLAYER_JUMP_SPEED = 10.5
 const BLOOD_GRAVITY = 22
 const BLOOD_LIFETIME = 0.55
 const CAMERA_SHAKE_DECAY = 3.6
+const ENEMY_BASE_HEIGHT = 0.88
 const BLOOD_PARTICLE_GEOMETRY = new THREE.SphereGeometry(0.09, 6, 6)
 
 const state = {
@@ -140,7 +141,7 @@ const audioState = {
 function randomSpawn() {
   const angle = Math.random() * Math.PI * 2
   const radius = THREE.MathUtils.randFloat(19, 30)
-  return new THREE.Vector3(Math.cos(angle) * radius, 0.65, Math.sin(angle) * radius)
+  return new THREE.Vector3(Math.cos(angle) * radius, ENEMY_BASE_HEIGHT, Math.sin(angle) * radius)
 }
 
 function ensureAudioReady() {
@@ -250,24 +251,77 @@ function applyCameraShake(delta) {
 }
 
 function spawnEnemy() {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 1.2, 1.2),
-    new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random(), 0.65, 0.56) })
-  )
+  const mesh = new THREE.Group()
   mesh.position.copy(randomSpawn())
-  mesh.castShadow = true
-  mesh.receiveShadow = true
+  const coreRadius = THREE.MathUtils.randFloat(0.75, 0.95)
+
+  const coreMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.96, 1.03), 0.52, 0.26),
+    emissive: new THREE.Color().setHSL(0.0, 0.75, 0.08),
+    roughness: 0.84,
+    metalness: 0.05,
+  })
+  const core = new THREE.Mesh(new THREE.SphereGeometry(coreRadius, 26, 22), coreMaterial)
+  core.castShadow = true
+  core.receiveShadow = true
+  mesh.add(core)
+
+  const organs = []
+  const organCount = THREE.MathUtils.randInt(9, 15)
+  for (let i = 0; i < organCount; i += 1) {
+    const direction = new THREE.Vector3(
+      THREE.MathUtils.randFloatSpread(1),
+      THREE.MathUtils.randFloat(-0.35, 0.7),
+      THREE.MathUtils.randFloatSpread(1)
+    ).normalize()
+    const radius = THREE.MathUtils.randFloat(0.11, 0.26)
+    const organGeometry = new THREE.SphereGeometry(radius, 12, 10)
+    const organMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.97, 1.02), 0.67, 0.35),
+      emissive: new THREE.Color().setHSL(0.01, 0.85, 0.1),
+      roughness: 0.58,
+      metalness: 0.08,
+    })
+    const organ = new THREE.Mesh(organGeometry, organMaterial)
+    const baseScale = new THREE.Vector3(
+      THREE.MathUtils.randFloat(0.75, 1.28),
+      THREE.MathUtils.randFloat(0.9, 1.75),
+      THREE.MathUtils.randFloat(0.75, 1.28)
+    )
+    organ.scale.copy(baseScale)
+    organ.castShadow = true
+    organ.receiveShadow = true
+
+    const baseOffset = coreRadius * THREE.MathUtils.randFloat(0.78, 1.06)
+    organ.position.copy(direction).multiplyScalar(baseOffset)
+    core.add(organ)
+
+    organs.push({
+      mesh: organ,
+      direction,
+      baseOffset,
+      baseScale,
+      pulseAmplitude: THREE.MathUtils.randFloat(0.04, 0.2),
+      pulseSpeed: THREE.MathUtils.randFloat(1.5, 4.4),
+      phase: Math.random() * Math.PI * 2,
+    })
+  }
 
   const hitbox = new THREE.Mesh(
-    new THREE.BoxGeometry(1.45, 1.45, 1.45),
+    new THREE.SphereGeometry(coreRadius + 0.56, 14, 12),
     new THREE.MeshBasicMaterial({ visible: false })
   )
-  hitbox.position.set(0, 0, 0)
+  hitbox.userData.enemyMesh = mesh
   mesh.add(hitbox)
 
   const enemy = {
     mesh,
+    core,
+    organs,
     hitbox,
+    corePulseSpeed: THREE.MathUtils.randFloat(2.4, 4.2),
+    phase: Math.random() * Math.PI * 2,
+    spinSpeed: THREE.MathUtils.randFloat(1.25, 2.05),
     speed: THREE.MathUtils.randFloat(1.7, 2.8),
     damageCooldown: THREE.MathUtils.randFloat(0.2, 0.9),
   }
@@ -278,10 +332,23 @@ function spawnEnemy() {
 
 function removeEnemy(enemy) {
   world.remove(enemy.mesh)
-  enemy.mesh.geometry.dispose()
-  enemy.mesh.material.dispose()
-  enemy.hitbox.geometry.dispose()
-  enemy.hitbox.material.dispose()
+  enemy.mesh.traverse((node) => {
+    if (!node.isMesh) {
+      return
+    }
+
+    if (node.geometry) {
+      node.geometry.dispose()
+    }
+
+    if (Array.isArray(node.material)) {
+      for (const material of node.material) {
+        material.dispose()
+      }
+    } else if (node.material) {
+      node.material.dispose()
+    }
+  })
 }
 
 function removeBloodBurst(burst) {
@@ -474,7 +541,7 @@ function handleShoot() {
   playHitSfx()
   addCameraShake(0.18)
 
-  const targetMesh = firstHit.object.parent
+  const targetMesh = firstHit.object.userData.enemyMesh || firstHit.object.parent
   const index = enemies.findIndex((enemy) => enemy.mesh === targetMesh)
   if (index === -1) {
     return
@@ -531,6 +598,8 @@ function processInput(delta) {
 }
 
 function updateEnemies(delta) {
+  const now = performance.now() * 0.001
+
   for (const enemy of enemies) {
     const toPlayer = new THREE.Vector3().subVectors(state.playerPosition, enemy.mesh.position)
     const distance = toPlayer.length()
@@ -540,7 +609,20 @@ function updateEnemies(delta) {
       enemy.mesh.position.addScaledVector(toPlayer, enemy.speed * delta)
     }
 
-    enemy.mesh.rotation.y += delta * 2.2
+    enemy.mesh.rotation.y += delta * enemy.spinSpeed
+
+    const coreBreath = 1 + Math.sin(now * enemy.corePulseSpeed + enemy.phase) * 0.08
+    enemy.core.scale.setScalar(coreBreath)
+    for (const organ of enemy.organs) {
+      const surge = Math.sin(now * organ.pulseSpeed + organ.phase) * organ.pulseAmplitude
+      const stretch = 1 + Math.sin(now * (organ.pulseSpeed * 1.3) + organ.phase) * 0.22
+      organ.mesh.position.copy(organ.direction).multiplyScalar(organ.baseOffset + surge)
+      organ.mesh.scale.set(
+        organ.baseScale.x * stretch,
+        organ.baseScale.y * (1 + surge * 0.9),
+        organ.baseScale.z * stretch
+      )
+    }
 
     enemy.damageCooldown -= delta
     if (distance < 1.9 && enemy.damageCooldown <= 0) {
