@@ -1,3 +1,42 @@
+function createHaloFlowTexture(THREE) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1024
+  canvas.height = 128
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    return null
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+  const bandGradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
+  bandGradient.addColorStop(0, 'rgba(255, 213, 120, 0)')
+  bandGradient.addColorStop(0.24, 'rgba(255, 198, 90, 0.2)')
+  bandGradient.addColorStop(0.5, 'rgba(255, 236, 166, 0.92)')
+  bandGradient.addColorStop(0.76, 'rgba(255, 198, 90, 0.2)')
+  bandGradient.addColorStop(1, 'rgba(255, 213, 120, 0)')
+  ctx.fillStyle = bandGradient
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  for (let i = 0; i < 20; i += 1) {
+    const x = Math.random() * canvas.width
+    const streakWidth = 12 + Math.random() * 56
+    const streak = ctx.createLinearGradient(x, 0, x + streakWidth, 0)
+    streak.addColorStop(0, 'rgba(255, 235, 170, 0)')
+    streak.addColorStop(0.45, 'rgba(255, 245, 200, 0.9)')
+    streak.addColorStop(1, 'rgba(255, 235, 170, 0)')
+    ctx.fillStyle = streak
+    ctx.fillRect(x, 8, streakWidth, canvas.height - 16)
+  }
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
+  texture.repeat.set(2.8, 1)
+  texture.needsUpdate = true
+  return texture
+}
+
 export function createPeaceSystem({
   THREE,
   scene,
@@ -69,10 +108,14 @@ export function createPeaceSystem({
   beaconGlow.receiveShadow = false
   lighthouse.add(beaconGlow)
 
+  const haloTexture = createHaloFlowTexture(THREE)
   const haloMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffd76f,
+    color: 0xfff0c6,
+    map: haloTexture,
     transparent: true,
-    opacity: 0.96,
+    opacity: 0.94,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
   })
   haloMaterial.fog = false
   const halo = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.11, 18, 52), haloMaterial)
@@ -81,22 +124,6 @@ export function createPeaceSystem({
   halo.castShadow = false
   halo.receiveShadow = false
   lighthouse.add(halo)
-
-  const haloAuraMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffcc55,
-    transparent: true,
-    opacity: 0.52,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  })
-  haloAuraMaterial.fog = false
-  const haloAura = new THREE.Mesh(new THREE.TorusGeometry(1.86, 0.24, 20, 64), haloAuraMaterial)
-  haloAura.position.y = 7.9
-  haloAura.rotation.x = Math.PI * 0.5
-  haloAura.castShadow = false
-  haloAura.receiveShadow = false
-  lighthouse.add(haloAura)
 
   const haloLight = new THREE.PointLight(0xffd27a, 1.6, 18, 1.4)
   haloLight.position.set(0, 7.9, 0)
@@ -146,22 +173,16 @@ export function createPeaceSystem({
       (0.88 + Math.sin(nowSeconds * 1.8 + 0.4) * 0.12)
 
     const haloPulse = 0.92 + Math.sin(nowSeconds * 1.55 + 0.9) * 0.08
-    const haloHeight = 7.9 + Math.sin(nowSeconds * 1.02 + 0.3) * 0.05
-    halo.position.y = haloHeight
-    halo.rotation.y = nowSeconds * 0.36
-    halo.rotation.z = Math.sin(nowSeconds * 0.72 + 0.5) * 0.03
-    haloMaterial.opacity = THREE.MathUtils.clamp(0.86 + nightFactor * 0.08 + haloPulse * 0.08, 0.82, 1)
+    halo.position.y = 7.9
+    halo.rotation.y = 0
+    halo.rotation.z = 0
+    haloMaterial.opacity = THREE.MathUtils.clamp(0.82 + nightFactor * 0.14 + haloPulse * 0.06, 0.8, 1)
 
-    haloAura.position.y = haloHeight
-    haloAura.rotation.y = -nowSeconds * 0.24
-    haloAura.rotation.z = Math.sin(nowSeconds * 0.55 + 1.2) * 0.028
-    haloAuraMaterial.opacity = THREE.MathUtils.clamp(
-      0.42 + nightFactor * 0.24 + haloPulse * 0.1,
-      0.36,
-      0.82
-    )
+    if (haloTexture) {
+      haloTexture.offset.x = (nowSeconds * (0.16 + nightFactor * 0.24)) % 1
+    }
 
-    haloLight.intensity = THREE.MathUtils.lerp(1.8, 3.4, nightFactor) * haloPulse
+    haloLight.intensity = THREE.MathUtils.lerp(2.1, 3.9, nightFactor) * haloPulse
   }
 
   function checkPeacefulWinCondition(playerPosition) {
