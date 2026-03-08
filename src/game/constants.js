@@ -30,6 +30,8 @@ export const PEACE_EXIT_POSITION = new THREE.Vector3(30.7, 0, 30.7)
 export const PEACE_EXIT_LOOK_TARGET_HEIGHT = 5.9
 export const PEACE_EXIT_TRIGGER_RADIUS = 2.45
 export const PEACE_SEARCHLIGHT_SWEEP_SPEED = 0.53
+export const LAVA_PEACE_EXIT_POSITION = new THREE.Vector3(21.2, 0, 0.8)
+export const LAVA_PEACE_EXIT_TRIGGER_RADIUS = 2.95
 
 // Player
 export const PLAYER_MAX_HP = 100

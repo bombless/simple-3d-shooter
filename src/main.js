@@ -22,7 +22,7 @@ const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 角落灯塔可和平胜利并进入下一关 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 两关都可通过灯塔和平胜利 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <div id="damage-overlay"></div>
@@ -35,7 +35,7 @@ app.innerHTML = `
   <div id="message" class="visible">
     <h1>Cube Strike</h1>
     <p>双关卡生存射击</p>
-    <p class="sub">第一关：荒野防线。可击败敌人或前往角落灯塔和平撤离来胜利，然后进入第二关熔岩平台。</p>
+    <p class="sub">第一关与第二关都支持和平撤离：找到对应灯塔即可胜利。第一关胜利后可进入第二关熔岩平台。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -136,15 +136,30 @@ const grassLevel = createGrassLevel({
   },
 })
 const lavaLevel = createLavaLevel({ THREE, world })
-const peaceSystem = createPeaceSystem({
+const peaceBoundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
+const grassPeaceSystem = createPeaceSystem({
   THREE,
   scene,
   world,
-  boundaryMaterial: new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 }),
+  boundaryMaterial: peaceBoundaryMaterial,
   config: {
     exitPosition: CONSTANTS.PEACE_EXIT_POSITION,
     triggerRadius: CONSTANTS.PEACE_EXIT_TRIGGER_RADIUS,
     searchlightSweepSpeed: CONSTANTS.PEACE_SEARCHLIGHT_SWEEP_SPEED,
+    includeBoundaries: true,
+  },
+  dayNightState,
+})
+const lavaPeaceSystem = createPeaceSystem({
+  THREE,
+  scene,
+  world,
+  boundaryMaterial: peaceBoundaryMaterial,
+  config: {
+    exitPosition: CONSTANTS.LAVA_PEACE_EXIT_POSITION,
+    triggerRadius: CONSTANTS.LAVA_PEACE_EXIT_TRIGGER_RADIUS,
+    searchlightSweepSpeed: CONSTANTS.PEACE_SEARCHLIGHT_SWEEP_SPEED,
+    includeBoundaries: false,
   },
   dayNightState,
 })
@@ -197,6 +212,16 @@ function getActiveLevelSystem() {
   return state.currentLevelIndex === 0 ? grassLevel : lavaLevel
 }
 
+function getActivePeaceSystem() {
+  return state.currentLevelIndex === 0 ? grassPeaceSystem : lavaPeaceSystem
+}
+
+function getActivePeaceExitPosition() {
+  return state.currentLevelIndex === 0
+    ? CONSTANTS.PEACE_EXIT_POSITION
+    : CONSTANTS.LAVA_PEACE_EXIT_POSITION
+}
+
 function hasNextLevel() {
   return state.currentLevelIndex < LEVELS.length - 1
 }
@@ -205,20 +230,19 @@ function setLevel(index) {
   state.currentLevelIndex = THREE.MathUtils.clamp(index, 0, LEVELS.length - 1)
   grassLevel.setActive(state.currentLevelIndex === 0)
   lavaLevel.setActive(state.currentLevelIndex === 1)
-  peaceSystem.setActive(state.currentLevelIndex === 0)
+  grassPeaceSystem.setActive(state.currentLevelIndex === 0)
+  lavaPeaceSystem.setActive(state.currentLevelIndex === 1)
   state.levelLabel = getActiveLevelMeta().label
   state.lavaDamageAccumulator = 0
 }
 
 function orientPlayerViewForSpawn() {
-  let lookTarget = getActiveLevelSystem().getPlayerLookTarget()
-  if (state.currentLevelIndex === 0) {
-    lookTarget = new THREE.Vector3(
-      CONSTANTS.PEACE_EXIT_POSITION.x,
-      CONSTANTS.PEACE_EXIT_LOOK_TARGET_HEIGHT,
-      CONSTANTS.PEACE_EXIT_POSITION.z
-    )
-  }
+  const peaceExitPosition = getActivePeaceExitPosition()
+  const lookTarget = new THREE.Vector3(
+    peaceExitPosition.x,
+    CONSTANTS.PEACE_EXIT_LOOK_TARGET_HEIGHT,
+    peaceExitPosition.z
+  )
   camera.position.copy(state.playerPosition)
   camera.lookAt(lookTarget)
   state.yaw = camera.rotation.y
@@ -561,8 +585,9 @@ function updateRoundState(delta) {
   }
 
   processInput(delta)
-  if (state.currentLevelIndex === 0 && peaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
-    endRound(true, '你抵达了角落灯塔，成功和平撤离')
+  const activePeaceSystem = getActivePeaceSystem()
+  if (activePeaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
+    endRound(true, `你在${getActiveLevelMeta().name}抵达灯塔，成功和平撤离`)
     return
   }
 
@@ -662,7 +687,8 @@ startBtn.addEventListener('click', beginRound)
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateDayNightCycle()
-  peaceSystem.updatePeaceLighthouse()
+  grassPeaceSystem.updatePeaceLighthouse()
+  lavaPeaceSystem.updatePeaceLighthouse()
   updateRoundState(delta)
   updateBloodBursts(world, bloodBursts, delta)
   updateHitRings(world, hitRings, camera, delta)

@@ -76,24 +76,31 @@ export function createPeaceSystem({
   scene.add(sceneRoot)
   let active = true
 
-  const { exitPosition, triggerRadius, searchlightSweepSpeed } = config
+  const {
+    exitPosition,
+    triggerRadius,
+    searchlightSweepSpeed,
+    includeBoundaries = true,
+  } = config
 
-  const boundarySegments = [
-    { width: 2, height: 3, depth: 70, position: new THREE.Vector3(-35, 1.5, 0) },
-    { width: 2, height: 3, depth: 62, position: new THREE.Vector3(35, 1.5, -4) },
-    { width: 70, height: 3, depth: 2, position: new THREE.Vector3(0, 1.5, -35) },
-    { width: 62, height: 3, depth: 2, position: new THREE.Vector3(-4, 1.5, 35) },
-  ]
+  if (includeBoundaries) {
+    const boundarySegments = [
+      { width: 2, height: 3, depth: 70, position: new THREE.Vector3(-35, 1.5, 0) },
+      { width: 2, height: 3, depth: 62, position: new THREE.Vector3(35, 1.5, -4) },
+      { width: 70, height: 3, depth: 2, position: new THREE.Vector3(0, 1.5, -35) },
+      { width: 62, height: 3, depth: 2, position: new THREE.Vector3(-4, 1.5, 35) },
+    ]
 
-  for (const segment of boundarySegments) {
-    const wall = new THREE.Mesh(
-      new THREE.BoxGeometry(segment.width, segment.height, segment.depth),
-      boundaryMaterial
-    )
-    wall.position.copy(segment.position)
-    wall.castShadow = true
-    wall.receiveShadow = true
-    worldRoot.add(wall)
+    for (const segment of boundarySegments) {
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(segment.width, segment.height, segment.depth),
+        boundaryMaterial
+      )
+      wall.position.copy(segment.position)
+      wall.castShadow = true
+      wall.receiveShadow = true
+      worldRoot.add(wall)
+    }
   }
 
   const lighthouse = new THREE.Group()
