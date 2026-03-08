@@ -2,27 +2,7 @@ import * as THREE from 'three'
 import {
   PLAYER_MAX_HP,
   DAMAGE_FLASH_DECAY,
-  FLASHLIGHT_EFFECT_INTENSITY_MIN,
-  FLASHLIGHT_EFFECT_INTENSITY_MAX,
 } from './constants'
-
-export function updateEffectUi(flashlightState, fxLabelEl, fxMeterValueEl, fxMeterFillEl) {
-  const intensityText = flashlightState.effectIntensity.toFixed(1)
-  const ratio =
-    (flashlightState.effectIntensity - FLASHLIGHT_EFFECT_INTENSITY_MIN) /
-    (FLASHLIGHT_EFFECT_INTENSITY_MAX - FLASHLIGHT_EFFECT_INTENSITY_MIN)
-  const clampedRatio = THREE.MathUtils.clamp(ratio, 0, 1)
-  const hue = THREE.MathUtils.lerp(190, 8, clampedRatio)
-  const saturation = THREE.MathUtils.lerp(72, 90, clampedRatio)
-  const lightness = THREE.MathUtils.lerp(58, 52, clampedRatio)
-  const effectColor = `hsl(${hue.toFixed(0)} ${saturation.toFixed(0)}% ${lightness.toFixed(0)}%)`
-
-  fxLabelEl.textContent = `FX ${intensityText}x`
-  fxMeterValueEl.textContent = `${intensityText}x`
-  fxMeterFillEl.style.height = `${(clampedRatio * 100).toFixed(1)}%`
-  fxMeterFillEl.style.background = `linear-gradient(180deg, ${effectColor}, rgba(255,255,255,0.9))`
-  fxMeterValueEl.style.color = effectColor
-}
 
 export function updateHpUi(state, hpBarLabelEl, hpBarFillEl) {
   const hpRatio = THREE.MathUtils.clamp(state.hp / PLAYER_MAX_HP, 0, 1)

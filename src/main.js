@@ -6,7 +6,7 @@ import { createPeaceSystem } from './game/peace'
 import { addStaticBoxCollider, processPlayerInput } from './game/playerMovement'
 import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
 import { spawnBloodBurst, clearBloodBursts, updateBloodBursts } from './game/blood'
-import { updateEffectUi, updateHpUi, updateDamageOverlay, updateHud } from './game/ui'
+import { updateHpUi, updateDamageOverlay, updateHud } from './game/ui'
 import { normalizeAngle, createFlashlightCookieTexture, addCameraShake, applyCameraShake } from './game/utils'
 import * as CONSTANTS from './game/constants'
 
@@ -15,18 +15,6 @@ app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
     <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 角落灯塔可和平胜利 | Esc 暂停 | R 重开</div>
-    <div id="fx-controls">
-      <button id="fx-dec" type="button" aria-label="降低效果强度">-</button>
-      <span id="fx-label">FX 1.0x</span>
-      <button id="fx-inc" type="button" aria-label="提高效果强度">=</button>
-    </div>
-    <div id="fx-meter" aria-hidden="true">
-      <div id="fx-meter-title">FX LEVEL</div>
-      <div id="fx-meter-track">
-        <div id="fx-meter-fill"></div>
-      </div>
-      <div id="fx-meter-value">1.0x</div>
-    </div>
   </div>
   <div id="crosshair"></div>
   <div id="damage-overlay"></div>
@@ -47,11 +35,6 @@ app.innerHTML = `
 const statsEl = document.querySelector('#stats')
 const messageEl = document.querySelector('#message')
 const startBtn = document.querySelector('#start-btn')
-const fxDecBtn = document.querySelector('#fx-dec')
-const fxIncBtn = document.querySelector('#fx-inc')
-const fxLabelEl = document.querySelector('#fx-label')
-const fxMeterFillEl = document.querySelector('#fx-meter-fill')
-const fxMeterValueEl = document.querySelector('#fx-meter-value')
 const hpBarLabelEl = document.querySelector('#hp-bar-label')
 const hpBarFillEl = document.querySelector('#hp-bar-fill')
 const damageOverlayEl = document.querySelector('#damage-overlay')
@@ -231,21 +214,6 @@ function orientPlayerViewToLighthouse() {
   state.yaw = camera.rotation.y
   state.pitch = THREE.MathUtils.clamp(camera.rotation.x, -1.35, 1.35)
   camera.rotation.set(state.pitch, state.yaw, 0)
-}
-
-function adjustFlashlightEffectIntensity(delta) {
-  const nextValue = THREE.MathUtils.clamp(
-    Math.round((flashlightState.effectIntensity + delta) * 10) / 10,
-    CONSTANTS.FLASHLIGHT_EFFECT_INTENSITY_MIN,
-    CONSTANTS.FLASHLIGHT_EFFECT_INTENSITY_MAX
-  )
-
-  if (nextValue === flashlightState.effectIntensity) {
-    return
-  }
-
-  flashlightState.effectIntensity = nextValue
-  updateEffectUi(flashlightState, fxLabelEl, fxMeterValueEl, fxMeterFillEl)
 }
 
 function applyPlayerDamage(amount) {
@@ -514,16 +482,6 @@ function updateRoundState(delta) {
 }
 
 window.addEventListener('keydown', (event) => {
-  if (event.code === 'Minus') {
-    adjustFlashlightEffectIntensity(-CONSTANTS.FLASHLIGHT_EFFECT_INTENSITY_STEP)
-    return
-  }
-
-  if (event.code === 'Equal') {
-    adjustFlashlightEffectIntensity(CONSTANTS.FLASHLIGHT_EFFECT_INTENSITY_STEP)
-    return
-  }
-
   if (event.code in keys) {
     keys[event.code] = true
   }
@@ -598,8 +556,6 @@ document.addEventListener('pointerlockchange', () => {
 })
 
 startBtn.addEventListener('click', beginRound)
-fxDecBtn.addEventListener('click', () => adjustFlashlightEffectIntensity(-CONSTANTS.FLASHLIGHT_EFFECT_INTENSITY_STEP))
-fxIncBtn.addEventListener('click', () => adjustFlashlightEffectIntensity(CONSTANTS.FLASHLIGHT_EFFECT_INTENSITY_STEP))
 
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
@@ -613,7 +569,6 @@ function animate() {
   requestAnimationFrame(animate)
 }
 
-updateEffectUi(flashlightState, fxLabelEl, fxMeterValueEl, fxMeterFillEl)
 updateDayNightCycle()
 resetRound()
 animate()
