@@ -59,6 +59,9 @@ export const AUDIO_AMBIENCE_GAIN = 1.35
 
 // Enemy
 export const ENEMY_BASE_HEIGHT = 0.88
+export const ENEMY_SPAWN_INTERVAL_DESKTOP_SECONDS = 1.4
+export const ENEMY_SPAWN_INTERVAL_MOBILE_SECONDS = 2.2
+export const ENEMY_MAX_ACTIVE_COUNT = 14
 
 // Blood
 export const BLOOD_GRAVITY = 22

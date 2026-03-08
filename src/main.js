@@ -57,12 +57,13 @@ const hpBarFillEl = document.querySelector('#hp-bar-fill')
 const damageOverlayEl = document.querySelector('#damage-overlay')
 
 const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 四关生存挑战 | Esc 暂停 | R 重开'
-const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 点击屏幕射击 | 双击前跳直到落地 | 建议横屏并开启全屏'
+const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 建议横屏并开启全屏'
 const MOBILE_LOOK_SENSITIVITY = 0.0038
 const MOBILE_TAP_MOVE_THRESHOLD = 10
-const MOBILE_TAP_MAX_DURATION_MS = 260
-const MOBILE_DOUBLE_TAP_WINDOW_MS = 300
+const MOBILE_TAP_MAX_DURATION_MS = 240
+const MOBILE_DOUBLE_TAP_WINDOW_MS = 260
 const MOBILE_DOUBLE_TAP_RANGE_PX = 42
+const MOBILE_COMBO_IDLE_EXIT_MS = 500
 const mobileControls = {
   enabled:
     window.matchMedia('(pointer: coarse)').matches ||
@@ -75,10 +76,13 @@ const mobileControls = {
   lastY: 0,
   touchStartedAtMs: 0,
   moved: false,
-  lastTapTimeMs: -Infinity,
-  lastTapX: 0,
-  lastTapY: 0,
+  pendingTap: null,
+  comboActive: false,
+  comboExpiresAtMs: -Infinity,
 }
+const enemySpawnIntervalSeconds = mobileControls.enabled
+  ? CONSTANTS.ENEMY_SPAWN_INTERVAL_MOBILE_SECONDS
+  : CONSTANTS.ENEMY_SPAWN_INTERVAL_DESKTOP_SECONDS
 
 const dayNightState = {
   startedAtMs: performance.now(),
@@ -421,6 +425,33 @@ async function toggleFullscreen() {
   }
 }
 
+function clearPendingMobileTap() {
+  if (!mobileControls.pendingTap) {
+    return
+  }
+  window.clearTimeout(mobileControls.pendingTap.timeoutId)
+  mobileControls.pendingTap = null
+}
+
+function clearMobileComboMode() {
+  mobileControls.comboActive = false
+  mobileControls.comboExpiresAtMs = -Infinity
+}
+
+function refreshMobileComboMode(nowMs = performance.now()) {
+  mobileControls.comboActive = true
+  mobileControls.comboExpiresAtMs = nowMs + MOBILE_COMBO_IDLE_EXIT_MS
+}
+
+function syncMobileComboMode(nowMs = performance.now()) {
+  if (!mobileControls.comboActive) {
+    return
+  }
+  if (nowMs >= mobileControls.comboExpiresAtMs) {
+    clearMobileComboMode()
+  }
+}
+
 function triggerMobileForwardJump() {
   if (!state.running || state.ended) {
     return
@@ -428,9 +459,7 @@ function triggerMobileForwardJump() {
 
   state.mobileForwardUntilLand = true
   state.mobileForwardAirborneSeen = !state.onGround
-  if (state.onGround) {
-    state.mobileJumpQueued = true
-  }
+  state.mobileJumpQueued = true
 }
 
 function setLevel(index) {
@@ -938,7 +967,8 @@ function resetRound() {
   state.mobileForwardUntilLand = false
   state.mobileForwardAirborneSeen = false
   state.mobileJumpQueued = false
-  mobileControls.lastTapTimeMs = -Infinity
+  clearPendingMobileTap()
+  clearMobileComboMode()
   flashlightState.battery = 1
   flashlightState.flickerTimeLeft = 0
   flashlightState.flickerMultiplier = 1
@@ -1012,7 +1042,8 @@ function endRound(victory, reason) {
   state.mobileForwardUntilLand = false
   state.mobileForwardAirborneSeen = false
   state.mobileJumpQueued = false
-  mobileControls.lastTapTimeMs = -Infinity
+  clearPendingMobileTap()
+  clearMobileComboMode()
   pauseRound()
   state.ended = true
   document.exitPointerLock()
@@ -1164,7 +1195,10 @@ function updateRoundState(delta) {
   }
 
   state.spawnAccumulator += delta
-  if (state.spawnAccumulator >= 1.4 && enemies.length < 14) {
+  if (
+    state.spawnAccumulator >= enemySpawnIntervalSeconds &&
+    enemies.length < CONSTANTS.ENEMY_MAX_ACTIVE_COUNT
+  ) {
     state.spawnAccumulator = 0
     spawnEnemyForCurrentLevel()
   }
@@ -1182,7 +1216,6 @@ function updateRoundState(delta) {
       state.mobileForwardAirborneSeen = false
     }
   }
-
   const activePeaceSystem = getActivePeaceSystem()
   if (activePeaceSystem && activePeaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
     endRound(true, `你在${getActiveLevelMeta().name}抵达灯塔，成功和平撤离`)
@@ -1220,23 +1253,45 @@ function queueMobileTapAction(clientX, clientY) {
   }
 
   const nowMs = performance.now()
-  const elapsedMs = nowMs - mobileControls.lastTapTimeMs
-  const deltaX = clientX - mobileControls.lastTapX
-  const deltaY = clientY - mobileControls.lastTapY
-  const isDoubleTap =
-    elapsedMs <= MOBILE_DOUBLE_TAP_WINDOW_MS &&
-    deltaX * deltaX + deltaY * deltaY <= MOBILE_DOUBLE_TAP_RANGE_PX * MOBILE_DOUBLE_TAP_RANGE_PX
+  syncMobileComboMode(nowMs)
 
-  if (isDoubleTap) {
-    mobileControls.lastTapTimeMs = -Infinity
-    triggerMobileForwardJump()
+  if (mobileControls.comboActive) {
+    clearPendingMobileTap()
+    refreshMobileComboMode(nowMs)
+    handleShoot(clientX, clientY)
     return
   }
 
-  mobileControls.lastTapTimeMs = nowMs
-  mobileControls.lastTapX = clientX
-  mobileControls.lastTapY = clientY
-  handleShoot(clientX, clientY)
+  const pendingTap = mobileControls.pendingTap
+  if (pendingTap) {
+    const elapsedMs = nowMs - pendingTap.timeMs
+    const deltaX = clientX - pendingTap.x
+    const deltaY = clientY - pendingTap.y
+    const isDoubleTap =
+      elapsedMs <= MOBILE_DOUBLE_TAP_WINDOW_MS &&
+      deltaX * deltaX + deltaY * deltaY <= MOBILE_DOUBLE_TAP_RANGE_PX * MOBILE_DOUBLE_TAP_RANGE_PX
+
+    clearPendingMobileTap()
+    if (isDoubleTap) {
+      refreshMobileComboMode(nowMs)
+      handleShoot(clientX, clientY)
+      return
+    }
+
+    triggerMobileForwardJump()
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    mobileControls.pendingTap = null
+    triggerMobileForwardJump()
+  }, MOBILE_DOUBLE_TAP_WINDOW_MS)
+
+  mobileControls.pendingTap = {
+    x: clientX,
+    y: clientY,
+    timeMs: nowMs,
+    timeoutId,
+  }
 }
 
 function handleTouchStart(event) {
