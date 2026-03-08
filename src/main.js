@@ -105,6 +105,9 @@ const keys = {
 const PLAYER_HEIGHT = 1.7
 const PLAYER_GRAVITY = 28
 const PLAYER_JUMP_SPEED = 10.5
+const BLOOD_GRAVITY = 22
+const BLOOD_LIFETIME = 0.55
+const BLOOD_PARTICLE_GEOMETRY = new THREE.SphereGeometry(0.09, 6, 6)
 
 const state = {
   running: false,
@@ -126,6 +129,7 @@ const state = {
 }
 
 const enemies = []
+const bloodBursts = []
 
 function randomSpawn() {
   const angle = Math.random() * Math.PI * 2
@@ -168,6 +172,89 @@ function removeEnemy(enemy) {
   enemy.hitbox.material.dispose()
 }
 
+function removeBloodBurst(burst) {
+  for (const particle of burst.particles) {
+    world.remove(particle.mesh)
+  }
+  burst.material.dispose()
+}
+
+function clearBloodBursts() {
+  while (bloodBursts.length > 0) {
+    const burst = bloodBursts.pop()
+    removeBloodBurst(burst)
+  }
+}
+
+function spawnBloodBurst(hitPoint, shotDirection) {
+  const particleCount = THREE.MathUtils.randInt(14, 22)
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xb50c12,
+    emissive: 0x2f0000,
+    roughness: 0.55,
+    metalness: 0.05,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+  })
+  const sprayDirection = shotDirection.clone().normalize()
+  const particles = []
+
+  for (let i = 0; i < particleCount; i += 1) {
+    const randomSpread = new THREE.Vector3(
+      THREE.MathUtils.randFloatSpread(1),
+      THREE.MathUtils.randFloatSpread(0.9),
+      THREE.MathUtils.randFloatSpread(1)
+    )
+    const velocity = sprayDirection.clone().add(randomSpread).normalize()
+    velocity.multiplyScalar(THREE.MathUtils.randFloat(4.2, 10.6))
+    velocity.y += THREE.MathUtils.randFloat(0.5, 2.4)
+
+    const droplet = new THREE.Mesh(BLOOD_PARTICLE_GEOMETRY, material)
+    droplet.position.copy(hitPoint)
+    droplet.scale.setScalar(THREE.MathUtils.randFloat(0.4, 1.4))
+    droplet.castShadow = false
+    droplet.receiveShadow = false
+    world.add(droplet)
+
+    particles.push({ mesh: droplet, velocity })
+  }
+
+  bloodBursts.push({
+    particles,
+    material,
+    life: BLOOD_LIFETIME,
+    maxLife: BLOOD_LIFETIME,
+  })
+}
+
+function updateBloodBursts(delta) {
+  for (let i = bloodBursts.length - 1; i >= 0; i -= 1) {
+    const burst = bloodBursts[i]
+    burst.life -= delta
+    burst.material.opacity = Math.max(0, burst.life / burst.maxLife) * 0.95
+
+    for (const particle of burst.particles) {
+      particle.velocity.y -= BLOOD_GRAVITY * delta
+      particle.velocity.multiplyScalar(0.985)
+      particle.mesh.position.addScaledVector(particle.velocity, delta)
+      particle.mesh.scale.multiplyScalar(0.992)
+
+      if (particle.mesh.position.y < 0.06) {
+        particle.mesh.position.y = 0.06
+        particle.velocity.y *= -0.16
+        particle.velocity.x *= 0.82
+        particle.velocity.z *= 0.82
+      }
+    }
+
+    if (burst.life <= 0) {
+      removeBloodBurst(burst)
+      bloodBursts.splice(i, 1)
+    }
+  }
+}
+
 function clearEnemies() {
   while (enemies.length > 0) {
     const enemy = enemies.pop()
@@ -177,6 +264,7 @@ function clearEnemies() {
 
 function resetRound() {
   clearEnemies()
+  clearBloodBursts()
   state.running = false
   state.ended = false
   state.hp = 100
@@ -265,7 +353,10 @@ function handleShoot() {
     return
   }
 
-  const targetMesh = intersections[0].object.parent
+  const firstHit = intersections[0]
+  spawnBloodBurst(firstHit.point, raycaster.ray.direction)
+
+  const targetMesh = firstHit.object.parent
   const index = enemies.findIndex((enemy) => enemy.mesh === targetMesh)
   if (index === -1) {
     return
@@ -441,6 +532,7 @@ startBtn.addEventListener('click', beginRound)
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateRoundState(delta)
+  updateBloodBursts(delta)
   renderer.render(scene, camera)
   requestAnimationFrame(animate)
 }
