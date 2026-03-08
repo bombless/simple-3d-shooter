@@ -107,6 +107,7 @@ const PLAYER_GRAVITY = 28
 const PLAYER_JUMP_SPEED = 10.5
 const BLOOD_GRAVITY = 22
 const BLOOD_LIFETIME = 0.55
+const CAMERA_SHAKE_DECAY = 3.6
 const BLOOD_PARTICLE_GEOMETRY = new THREE.SphereGeometry(0.09, 6, 6)
 
 const state = {
@@ -124,17 +125,128 @@ const state = {
   playerPosition: new THREE.Vector3(0, PLAYER_HEIGHT, 12),
   verticalVelocity: 0,
   onGround: true,
+  shakeAmount: 0,
   yaw: 0,
   pitch: 0,
 }
 
 const enemies = []
 const bloodBursts = []
+const audioState = {
+  context: null,
+  master: null,
+}
 
 function randomSpawn() {
   const angle = Math.random() * Math.PI * 2
   const radius = THREE.MathUtils.randFloat(19, 30)
   return new THREE.Vector3(Math.cos(angle) * radius, 0.65, Math.sin(angle) * radius)
+}
+
+function ensureAudioReady() {
+  if (!audioState.context) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) {
+      return false
+    }
+
+    const context = new AudioContextClass()
+    const master = context.createGain()
+    master.gain.value = 0.22
+    master.connect(context.destination)
+
+    audioState.context = context
+    audioState.master = master
+  }
+
+  if (audioState.context.state === 'suspended') {
+    audioState.context.resume().catch(() => {})
+  }
+
+  return audioState.context.state === 'running'
+}
+
+function playTone({
+  frequency = 220,
+  endFrequency = frequency,
+  duration = 0.1,
+  type = 'sine',
+  volume = 0.2,
+  attack = 0.002,
+  release = 0.06,
+}) {
+  if (!ensureAudioReady()) {
+    return
+  }
+
+  const now = audioState.context.currentTime
+  const oscillator = audioState.context.createOscillator()
+  const gain = audioState.context.createGain()
+
+  oscillator.type = type
+  oscillator.frequency.setValueAtTime(frequency, now)
+  oscillator.frequency.exponentialRampToValueAtTime(Math.max(30, endFrequency), now + duration)
+
+  gain.gain.setValueAtTime(0.0001, now)
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + attack)
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration + release)
+
+  oscillator.connect(gain)
+  gain.connect(audioState.master)
+  oscillator.start(now)
+  oscillator.stop(now + duration + release + 0.01)
+}
+
+function playShotSfx() {
+  playTone({
+    frequency: 310,
+    endFrequency: 145,
+    duration: 0.06,
+    type: 'square',
+    volume: 0.085,
+    release: 0.04,
+  })
+}
+
+function playHitSfx() {
+  playTone({
+    frequency: 820,
+    endFrequency: 280,
+    duration: 0.075,
+    type: 'triangle',
+    volume: 0.09,
+    release: 0.055,
+  })
+}
+
+function playHurtSfx() {
+  playTone({
+    frequency: 170,
+    endFrequency: 82,
+    duration: 0.11,
+    type: 'sawtooth',
+    volume: 0.12,
+    release: 0.08,
+  })
+}
+
+function addCameraShake(amount) {
+  state.shakeAmount = Math.max(state.shakeAmount, amount)
+}
+
+function applyCameraShake(delta) {
+  if (state.shakeAmount <= 0) {
+    return
+  }
+
+  const shakeX = THREE.MathUtils.randFloatSpread(state.shakeAmount * 2)
+  const shakeY = THREE.MathUtils.randFloatSpread(state.shakeAmount * 1.4)
+  const shakeZ = THREE.MathUtils.randFloatSpread(state.shakeAmount * 2)
+  camera.position.x += shakeX
+  camera.position.y += shakeY
+  camera.position.z += shakeZ
+
+  state.shakeAmount = Math.max(0, state.shakeAmount - CAMERA_SHAKE_DECAY * delta)
 }
 
 function spawnEnemy() {
@@ -276,6 +388,7 @@ function resetRound() {
   state.fireCooldown = 0
   state.verticalVelocity = 0
   state.onGround = true
+  state.shakeAmount = 0
   state.yaw = 0
   state.pitch = 0
   state.playerPosition.set(0, PLAYER_HEIGHT, 12)
@@ -307,6 +420,7 @@ function beginRound() {
   }
 
   if (!state.running) {
+    ensureAudioReady()
     state.running = true
     if (state.runStartedMs === 0) {
       state.runStartedMs = performance.now()
@@ -344,6 +458,8 @@ function handleShoot() {
     return
   }
 
+  playShotSfx()
+  addCameraShake(0.055)
   state.fireCooldown = 0.14
   raycaster.setFromCamera(pointer, camera)
 
@@ -355,6 +471,8 @@ function handleShoot() {
 
   const firstHit = intersections[0]
   spawnBloodBurst(firstHit.point, raycaster.ray.direction)
+  playHitSfx()
+  addCameraShake(0.18)
 
   const targetMesh = firstHit.object.parent
   const index = enemies.findIndex((enemy) => enemy.mesh === targetMesh)
@@ -428,6 +546,8 @@ function updateEnemies(delta) {
     if (distance < 1.9 && enemy.damageCooldown <= 0) {
       state.hp -= 9
       enemy.damageCooldown = 0.9
+      playHurtSfx()
+      addCameraShake(0.28)
       if (state.hp <= 0) {
         endRound(false, '你的生命值归零了')
         return
@@ -533,6 +653,7 @@ function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateRoundState(delta)
   updateBloodBursts(delta)
+  applyCameraShake(delta)
   renderer.render(scene, camera)
   requestAnimationFrame(animate)
 }
