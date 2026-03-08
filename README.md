@@ -1,0 +1,64 @@
+# Simple 3D Shooter (PC 单机)
+
+一个基于 **Three.js + Vite** 的轻量 3D 射击小游戏，适合本地快速跑起来和继续二次开发。
+
+## 功能
+
+- 第一人称视角（鼠标控制镜头）
+- WASD 移动
+- 左键射击（屏幕中心准星）
+- 敌人追击与伤害判定
+- 计分、生命值、倒计时 HUD
+- 胜负结算、暂停与重开
+
+## 环境要求
+
+- Node.js 18+
+- npm 9+
+
+当前机器已验证版本：
+
+- Node.js `v25.7.0`
+- npm `11.11.0`
+
+## 安装与启动
+
+```bash
+cd /home/openclaw/simple-3d-shooter
+npm install
+npm run start
+```
+
+默认地址：
+
+- `http://localhost:4173`
+
+## 操作说明
+
+- `W/A/S/D`：移动
+- `Space`：跳跃
+- 鼠标移动：视角旋转
+- 鼠标左键：射击
+- `Esc`：暂停（释放鼠标）
+- `R`：重开
+
+## 胜负规则
+
+- 击败 `20` 个敌人，立即胜利
+- 或生存 `90` 秒，胜利
+- 生命值降到 `0`，失败
+
+## 打包构建
+
+```bash
+npm run build
+```
+
+构建产物在 `dist/`。
+
+## 可调参数（在 `src/main.js`）
+
+- `enemyGoal`: 胜利击杀数（默认 `20`）
+- `roundTime`: 回合时长秒数（默认 `90`）
+- 刷新间隔与上限：`spawnAccumulator` / `enemies.length < 14`
+- 玩家移速：`moveSpeed = 10`
