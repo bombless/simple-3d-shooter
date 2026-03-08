@@ -1,5 +1,9 @@
 import './style.css'
 import * as THREE from 'three'
+import { createAudioController } from './game/audio'
+import { createDayNightController } from './game/dayNight'
+import { createPeaceSystem } from './game/peace'
+import { addStaticBoxCollider, processPlayerInput } from './game/playerMovement'
 
 const app = document.querySelector('#app')
 app.innerHTML = `
@@ -85,8 +89,6 @@ const DAMAGE_FLASH_DECAY = 1.12
 const AUDIO_MASTER_GAIN = 0.42
 const AUDIO_SFX_GAIN = 1.2
 const AUDIO_AMBIENCE_GAIN = 1.35
-const tempSunOrbitPos = new THREE.Vector3()
-const tempMoonOrbitPos = new THREE.Vector3()
 
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setSize(window.innerWidth, window.innerHeight)
@@ -187,98 +189,22 @@ for (let i = 0; i < 22; i += 1) {
   block.castShadow = true
   block.receiveShadow = true
   world.add(block)
-  addStaticBoxCollider(block.position, width, height, depth)
+  addStaticBoxCollider(staticColliders, block.position, width, height, depth)
 }
 
 const boundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
-const boundarySegments = [
-  { width: 2, height: 3, depth: 70, position: new THREE.Vector3(-35, 1.5, 0) },
-  { width: 2, height: 3, depth: 62, position: new THREE.Vector3(35, 1.5, -4) },
-  { width: 70, height: 3, depth: 2, position: new THREE.Vector3(0, 1.5, -35) },
-  { width: 62, height: 3, depth: 2, position: new THREE.Vector3(-4, 1.5, 35) },
-]
-for (const segment of boundarySegments) {
-  const wall = new THREE.Mesh(
-    new THREE.BoxGeometry(segment.width, segment.height, segment.depth),
-    boundaryMaterial
-  )
-  wall.position.copy(segment.position)
-  wall.castShadow = true
-  wall.receiveShadow = true
-  world.add(wall)
-}
-
-const lighthouse = new THREE.Group()
-lighthouse.position.set(PEACE_EXIT_POSITION.x, 0, PEACE_EXIT_POSITION.z)
-world.add(lighthouse)
-
-const lighthouseBody = new THREE.Mesh(
-  new THREE.CylinderGeometry(1.12, 1.3, 5.2, 18),
-  new THREE.MeshStandardMaterial({
-    color: 0xd6d8de,
-    roughness: 0.84,
-    metalness: 0.12,
-  })
-)
-lighthouseBody.position.y = 2.6
-lighthouseBody.castShadow = true
-lighthouseBody.receiveShadow = true
-lighthouse.add(lighthouseBody)
-
-const lighthouseTop = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.86, 0.96, 1.5, 16),
-  new THREE.MeshStandardMaterial({
-    color: 0x505d72,
-    roughness: 0.5,
-    metalness: 0.32,
-  })
-)
-lighthouseTop.position.y = 5.95
-lighthouseTop.castShadow = true
-lighthouseTop.receiveShadow = true
-lighthouse.add(lighthouseTop)
-
-const beaconGlowMaterial = new THREE.MeshStandardMaterial({
-  color: 0xd5edff,
-  emissive: 0x5ab6ff,
-  emissiveIntensity: 1.08,
-  roughness: 0.2,
-  metalness: 0.06,
+const peaceSystem = createPeaceSystem({
+  THREE,
+  scene,
+  world,
+  boundaryMaterial,
+  config: {
+    exitPosition: PEACE_EXIT_POSITION,
+    triggerRadius: PEACE_EXIT_TRIGGER_RADIUS,
+    searchlightSweepSpeed: PEACE_SEARCHLIGHT_SWEEP_SPEED,
+  },
+  dayNightState,
 })
-const beaconGlow = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), beaconGlowMaterial)
-beaconGlow.position.y = 6.55
-beaconGlow.castShadow = false
-beaconGlow.receiveShadow = false
-lighthouse.add(beaconGlow)
-
-const peaceSpotlight = new THREE.SpotLight(0xeaf6ff, 2.2, 32, Math.PI / 7.2, 0.56, 1.08)
-peaceSpotlight.position.set(0, 6.5, 0)
-peaceSpotlight.castShadow = false
-lighthouse.add(peaceSpotlight)
-
-const peaceSpotlightTarget = new THREE.Object3D()
-peaceSpotlightTarget.position.set(PEACE_EXIT_POSITION.x - 7.8, 0.15, PEACE_EXIT_POSITION.z - 2.4)
-scene.add(peaceSpotlightTarget)
-peaceSpotlight.target = peaceSpotlightTarget
-
-const peaceZoneMaterial = new THREE.MeshBasicMaterial({
-  color: 0x9dd7ff,
-  transparent: true,
-  opacity: 0.36,
-})
-const peaceZoneRing = new THREE.Mesh(new THREE.RingGeometry(1.38, 2.55, 48), peaceZoneMaterial)
-peaceZoneRing.position.set(PEACE_EXIT_POSITION.x, 0.05, PEACE_EXIT_POSITION.z)
-peaceZoneRing.rotation.x = -Math.PI / 2
-world.add(peaceZoneRing)
-
-const peaceState = {
-  lighthouse,
-  spotlight: peaceSpotlight,
-  spotlightTarget: peaceSpotlightTarget,
-  zoneMaterial: peaceZoneMaterial,
-  zoneRing: peaceZoneRing,
-  beaconGlowMaterial,
-}
 
 const pointer = new THREE.Vector2(0, 0)
 const raycaster = new THREE.Raycaster()
@@ -296,6 +222,8 @@ const PLAYER_HEIGHT = 1.7
 const PLAYER_COLLIDER_RADIUS = 0.36
 const PLAYER_COLLIDER_BODY_HEIGHT = 1.72
 const PLAYER_STEP_HEIGHT = 0.28
+const PLAYER_MOVE_SPEED = 10
+const WORLD_CLAMP = 31.5
 const PLAYER_GRAVITY = 28
 const PLAYER_JUMP_SPEED = 10.5
 const BLOOD_GRAVITY = 22
@@ -328,23 +256,6 @@ const state = {
 
 const enemies = []
 const bloodBursts = []
-const audioState = {
-  context: null,
-  master: null,
-  sfxBus: null,
-  ambienceBus: null,
-  lastVictoryAt: 0,
-  nightAmbience: {
-    initialized: false,
-    layerGain: null,
-    noiseFilter: null,
-    droneFilter: null,
-    droneAGain: null,
-    droneBGain: null,
-    whineGain: null,
-    whineFilter: null,
-  },
-}
 const tempEnemyEyePosition = new THREE.Vector3()
 const tempEnemyEyeForward = new THREE.Vector3()
 const tempEnemyEyeToCamera = new THREE.Vector3()
@@ -370,33 +281,6 @@ function updateEffectUi() {
   fxMeterFillEl.style.height = `${(clampedRatio * 100).toFixed(1)}%`
   fxMeterFillEl.style.background = `linear-gradient(180deg, ${effectColor}, rgba(255,255,255,0.9))`
   fxMeterValueEl.style.color = effectColor
-}
-
-function addStaticBoxCollider(center, width, height, depth) {
-  staticColliders.push({
-    minX: center.x - width / 2,
-    maxX: center.x + width / 2,
-    minZ: center.z - depth / 2,
-    maxZ: center.z + depth / 2,
-    minY: center.y - height / 2,
-    maxY: center.y + height / 2,
-  })
-}
-
-function overlapsColliderXZ(x, z, radius, collider) {
-  return (
-    x + radius > collider.minX &&
-    x - radius < collider.maxX &&
-    z + radius > collider.minZ &&
-    z - radius < collider.maxZ
-  )
-}
-
-function colliderBlocksSide(collider, feetY) {
-  return (
-    feetY < collider.maxY - PLAYER_STEP_HEIGHT &&
-    feetY + PLAYER_COLLIDER_BODY_HEIGHT > collider.minY + 0.02
-  )
 }
 
 function adjustFlashlightEffectIntensity(delta) {
@@ -504,299 +388,23 @@ function randomSpawn() {
   return new THREE.Vector3(Math.cos(angle) * radius, ENEMY_BASE_HEIGHT, Math.sin(angle) * radius)
 }
 
-function ensureAudioReady() {
-  if (!audioState.context) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext
-    if (!AudioContextClass) {
-      return false
-    }
-
-    const context = new AudioContextClass()
-    const master = context.createGain()
-    const sfxBus = context.createGain()
-    const ambienceBus = context.createGain()
-    master.gain.value = AUDIO_MASTER_GAIN
-    sfxBus.gain.value = AUDIO_SFX_GAIN
-    ambienceBus.gain.value = AUDIO_AMBIENCE_GAIN
-    sfxBus.connect(master)
-    ambienceBus.connect(master)
-    master.connect(context.destination)
-
-    audioState.context = context
-    audioState.master = master
-    audioState.sfxBus = sfxBus
-    audioState.ambienceBus = ambienceBus
-  }
-
-  ensureNightAmbience()
-
-  if (audioState.context.state === 'suspended') {
-    audioState.context.resume().catch(() => {})
-  }
-
-  return audioState.context.state !== 'closed'
-}
-
-function createNoiseBuffer(context, durationSeconds = 2.4) {
-  const frameCount = Math.floor(context.sampleRate * durationSeconds)
-  const buffer = context.createBuffer(1, frameCount, context.sampleRate)
-  const data = buffer.getChannelData(0)
-
-  let previous = 0
-  for (let i = 0; i < frameCount; i += 1) {
-    const white = Math.random() * 2 - 1
-    previous = previous * 0.982 + white * 0.18
-    data[i] = previous
-  }
-
-  return buffer
-}
-
-function ensureNightAmbience() {
-  if (!audioState.context || !audioState.ambienceBus || audioState.nightAmbience.initialized) {
-    return
-  }
-
-  const context = audioState.context
-  const layerGain = context.createGain()
-  layerGain.gain.value = 0
-  layerGain.connect(audioState.ambienceBus)
-
-  const noiseSource = context.createBufferSource()
-  noiseSource.buffer = createNoiseBuffer(context)
-  noiseSource.loop = true
-  const noiseFilter = context.createBiquadFilter()
-  noiseFilter.type = 'bandpass'
-  noiseFilter.frequency.value = 380
-  noiseFilter.Q.value = 0.95
-  const noiseGain = context.createGain()
-  noiseGain.gain.value = 0.17
-  noiseSource.connect(noiseFilter)
-  noiseFilter.connect(noiseGain)
-  noiseGain.connect(layerGain)
-
-  const droneA = context.createOscillator()
-  droneA.type = 'sawtooth'
-  droneA.frequency.value = 67
-  droneA.detune.value = -8
-  const droneAGain = context.createGain()
-  droneAGain.gain.value = 0.11
-
-  const droneB = context.createOscillator()
-  droneB.type = 'triangle'
-  droneB.frequency.value = 93
-  droneB.detune.value = 6
-  const droneBGain = context.createGain()
-  droneBGain.gain.value = 0.085
-
-  const droneFilter = context.createBiquadFilter()
-  droneFilter.type = 'lowpass'
-  droneFilter.frequency.value = 360
-  droneFilter.Q.value = 0.8
-
-  droneA.connect(droneAGain)
-  droneAGain.connect(droneFilter)
-  droneB.connect(droneBGain)
-  droneBGain.connect(droneFilter)
-  droneFilter.connect(layerGain)
-
-  const whine = context.createOscillator()
-  whine.type = 'sine'
-  whine.frequency.value = 178
-  const whineFilter = context.createBiquadFilter()
-  whineFilter.type = 'bandpass'
-  whineFilter.frequency.value = 720
-  whineFilter.Q.value = 2.3
-  const whineGain = context.createGain()
-  whineGain.gain.value = 0.015
-  whine.connect(whineFilter)
-  whineFilter.connect(whineGain)
-  whineGain.connect(layerGain)
-
-  noiseSource.start()
-  droneA.start()
-  droneB.start()
-  whine.start()
-
-  audioState.nightAmbience = {
-    initialized: true,
-    layerGain,
-    noiseFilter,
-    droneFilter,
-    droneAGain,
-    droneBGain,
-    whineGain,
-    whineFilter,
-  }
-}
-
-function updateNightAmbience(nightFactor, nowSeconds, deltaSeconds) {
-  if (!audioState.context || !audioState.ambienceBus) {
-    return
-  }
-
-  ensureNightAmbience()
-  const ambience = audioState.nightAmbience
-  if (!ambience.initialized || !ambience.layerGain) {
-    return
-  }
-
-  const nightPresence = THREE.MathUtils.smoothstep(nightFactor, 0.28, 1)
-  const isActiveRound = state.running && !state.ended
-  const activityFactor = isActiveRound ? 1 : 0.46
-  const wobble =
-    0.86 +
-    Math.sin(nowSeconds * 0.24) * 0.11 +
-    Math.sin(nowSeconds * 0.59 + 1.7) * 0.06
-  const targetLayerGain = nightPresence * activityFactor * 0.45 * wobble
-  const smoothing = Math.min(1, deltaSeconds * 3.8)
-  const smoothedGain = THREE.MathUtils.lerp(
-    ambience.layerGain.gain.value,
-    targetLayerGain,
-    smoothing
-  )
-  const currentTime = audioState.context.currentTime
-  ambience.layerGain.gain.setValueAtTime(smoothedGain, currentTime)
-
-  const noiseFrequency = THREE.MathUtils.lerp(260, 740, nightPresence) + Math.sin(nowSeconds * 0.36) * 65
-  ambience.noiseFilter.frequency.setValueAtTime(Math.max(80, noiseFrequency), currentTime)
-
-  const droneCutoff = THREE.MathUtils.lerp(210, 440, nightPresence) + Math.sin(nowSeconds * 0.17 + 0.5) * 30
-  ambience.droneFilter.frequency.setValueAtTime(Math.max(80, droneCutoff), currentTime)
-  ambience.droneAGain.gain.setValueAtTime(0.08 + nightPresence * 0.055, currentTime)
-  ambience.droneBGain.gain.setValueAtTime(0.06 + nightPresence * 0.04, currentTime)
-
-  const whinePulse =
-    0.62 + Math.pow((Math.sin(nowSeconds * 0.83 + 0.8) + 1) * 0.5, 2) * 0.88
-  const whineTarget = nightPresence * 0.028 * whinePulse
-  ambience.whineGain.gain.setValueAtTime(whineTarget, currentTime)
-  ambience.whineFilter.frequency.setValueAtTime(
-    THREE.MathUtils.lerp(620, 980, nightPresence) + Math.sin(nowSeconds * 0.49 + 0.4) * 28,
-    currentTime
-  )
-}
-
-function playTone({
-  frequency = 220,
-  endFrequency = frequency,
-  duration = 0.1,
-  type = 'sine',
-  volume = 0.2,
-  attack = 0.002,
-  release = 0.06,
-  startAt = null,
-}) {
-  if (!ensureAudioReady()) {
-    return
-  }
-
-  const now = startAt ?? audioState.context.currentTime
-  const oscillator = audioState.context.createOscillator()
-  const gain = audioState.context.createGain()
-
-  oscillator.type = type
-  oscillator.frequency.setValueAtTime(frequency, now)
-  oscillator.frequency.exponentialRampToValueAtTime(Math.max(30, endFrequency), now + duration)
-
-  gain.gain.setValueAtTime(0.0001, now)
-  gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, volume), now + attack)
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration + release)
-
-  oscillator.connect(gain)
-  gain.connect(audioState.sfxBus || audioState.master)
-  oscillator.start(now)
-  oscillator.stop(now + duration + release + 0.01)
-}
-
-function playShotSfx() {
-  playTone({
-    frequency: 310,
-    endFrequency: 145,
-    duration: 0.06,
-    type: 'square',
-    volume: 0.085,
-    release: 0.04,
-  })
-}
-
-function playHitSfx() {
-  playTone({
-    frequency: 820,
-    endFrequency: 280,
-    duration: 0.075,
-    type: 'triangle',
-    volume: 0.09,
-    release: 0.055,
-  })
-}
-
-function playHurtSfx() {
-  playTone({
-    frequency: 170,
-    endFrequency: 82,
-    duration: 0.11,
-    type: 'sawtooth',
-    volume: 0.12,
-    release: 0.08,
-  })
-}
-
-function playVictorySfx() {
-  const nowMs = performance.now()
-  if (nowMs - audioState.lastVictoryAt < 1500) {
-    return
-  }
-  audioState.lastVictoryAt = nowMs
-
-  if (!ensureAudioReady()) {
-    return
-  }
-
-  const startAt = audioState.context.currentTime + 0.03
-  const melody = [
-    { frequency: 523.25, duration: 0.12 },
-    { frequency: 659.25, duration: 0.12 },
-    { frequency: 783.99, duration: 0.14 },
-    { frequency: 1046.5, duration: 0.18 },
-    { frequency: 783.99, duration: 0.12 },
-    { frequency: 1046.5, duration: 0.2 },
-    { frequency: 1318.51, duration: 0.3 },
-  ]
-  const bass = [
-    { frequency: 130.81, duration: 0.16, offset: 0 },
-    { frequency: 164.81, duration: 0.16, offset: 0.24 },
-    { frequency: 196.0, duration: 0.2, offset: 0.49 },
-    { frequency: 261.63, duration: 0.28, offset: 0.82 },
-  ]
-
-  let cursor = 0
-  for (const note of melody) {
-    playTone({
-      frequency: note.frequency,
-      endFrequency: note.frequency * 1.015,
-      duration: note.duration,
-      type: 'triangle',
-      volume: 0.12,
-      attack: 0.004,
-      release: 0.08,
-      startAt: startAt + cursor,
-    })
-    cursor += note.duration * 0.88
-  }
-
-  for (const note of bass) {
-    playTone({
-      frequency: note.frequency,
-      endFrequency: note.frequency * 0.985,
-      duration: note.duration,
-      type: 'sine',
-      volume: 0.09,
-      attack: 0.008,
-      release: 0.09,
-      startAt: startAt + note.offset,
-    })
-  }
-}
+const audioController = createAudioController({
+  THREE,
+  state,
+  config: {
+    masterGain: AUDIO_MASTER_GAIN,
+    sfxGain: AUDIO_SFX_GAIN,
+    ambienceGain: AUDIO_AMBIENCE_GAIN,
+  },
+})
+const {
+  ensureAudioReady,
+  updateNightAmbience,
+  playShotSfx,
+  playHitSfx,
+  playHurtSfx,
+  playVictorySfx,
+} = audioController
 
 function addCameraShake(amount) {
   state.shakeAmount = Math.max(state.shakeAmount, amount)
@@ -816,182 +424,51 @@ function applyCameraShake(delta) {
 
   state.shakeAmount = Math.max(0, state.shakeAmount - CAMERA_SHAKE_DECAY * delta)
 }
+const { updateDayNightCycle } = createDayNightController({
+  THREE,
+  scene,
+  state,
+  dayNightState,
+  flashlightState,
+  lights: {
+    hemiLight,
+    sunLight,
+    sunLightTarget,
+    moonLight,
+    moonLightTarget,
+    flashlight,
+    flashlightTarget,
+    flashlightFocus,
+    flashlightFocusTarget,
+    sunOrb,
+    moonOrb,
+    sunOrbMaterial,
+    moonOrbMaterial,
+  },
+  orbit: {
+    dayNightCycleSeconds: DAY_NIGHT_CYCLE_SECONDS,
+    celestialOrbitRadius: CELESTIAL_ORBIT_RADIUS,
+    celestialOrbitTilt: CELESTIAL_ORBIT_TILT,
+    celestialOrbitAxis: CELESTIAL_ORBIT_AXIS,
+    flashlightDrainRate: FLASHLIGHT_DRAIN_RATE,
+    flashlightRechargeRate: FLASHLIGHT_RECHARGE_RATE,
+  },
+  colors: {
+    skyDayColor: SKY_DAY_COLOR,
+    skyDuskColor: SKY_DUSK_COLOR,
+    skyNightColor: SKY_NIGHT_COLOR,
+    fogDayColor: FOG_DAY_COLOR,
+    fogDuskColor: FOG_DUSK_COLOR,
+    fogNightColor: FOG_NIGHT_COLOR,
+    sunDayColor: SUN_DAY_COLOR,
+    sunNightColor: SUN_NIGHT_COLOR,
+    moonDayColor: MOON_DAY_COLOR,
+    moonNightColor: MOON_NIGHT_COLOR,
+  },
+  updateNightAmbience,
+})
 
-function updateDayNightCycle() {
-  const nowMs = performance.now()
-  const nowSeconds = nowMs * 0.001
-  const deltaSeconds = Math.min(0.05, Math.max(0, (nowMs - flashlightState.lastUpdateMs) / 1000))
-  flashlightState.lastUpdateMs = nowMs
-
-  const elapsedSeconds = (nowMs - dayNightState.startedAtMs) / 1000
-  const cycleProgress = (elapsedSeconds % DAY_NIGHT_CYCLE_SECONDS) / DAY_NIGHT_CYCLE_SECONDS
-  const orbitAngle = cycleProgress * Math.PI * 2 - Math.PI / 2
-  const sunHeight = Math.sin(orbitAngle)
-  const moonHeight = -sunHeight
-  const dayFactor = THREE.MathUtils.smoothstep(sunHeight, -0.12, 0.38)
-  const nightFactor = 1 - dayFactor
-  const duskFactor = 1 - Math.abs(dayFactor * 2 - 1)
-  dayNightState.dayFactor = dayFactor
-
-  tempSunOrbitPos.set(
-    Math.cos(orbitAngle) * CELESTIAL_ORBIT_RADIUS,
-    Math.sin(orbitAngle) * CELESTIAL_ORBIT_RADIUS,
-    Math.sin(orbitAngle * 0.75) * CELESTIAL_ORBIT_RADIUS * 0.32
-  )
-  tempSunOrbitPos.applyAxisAngle(CELESTIAL_ORBIT_AXIS, CELESTIAL_ORBIT_TILT)
-  tempSunOrbitPos.x += state.playerPosition.x
-  tempSunOrbitPos.y += 10
-  tempSunOrbitPos.z += state.playerPosition.z
-
-  tempMoonOrbitPos.set(
-    Math.cos(orbitAngle + Math.PI) * CELESTIAL_ORBIT_RADIUS,
-    Math.sin(orbitAngle + Math.PI) * CELESTIAL_ORBIT_RADIUS,
-    Math.sin((orbitAngle + Math.PI) * 0.75) * CELESTIAL_ORBIT_RADIUS * 0.32
-  )
-  tempMoonOrbitPos.applyAxisAngle(CELESTIAL_ORBIT_AXIS, CELESTIAL_ORBIT_TILT)
-  tempMoonOrbitPos.x += state.playerPosition.x
-  tempMoonOrbitPos.y += 10
-  tempMoonOrbitPos.z += state.playerPosition.z
-
-  sunOrb.position.copy(tempSunOrbitPos)
-  moonOrb.position.copy(tempMoonOrbitPos)
-  sunOrbMaterial.opacity = THREE.MathUtils.clamp((sunHeight + 0.24) / 1.24, 0, 1)
-  moonOrbMaterial.opacity = THREE.MathUtils.clamp((moonHeight + 0.22) / 1.22, 0.08, 1)
-
-  scene.background.copy(SKY_NIGHT_COLOR)
-  scene.background.lerp(SKY_DUSK_COLOR, duskFactor * 0.65)
-  scene.background.lerp(SKY_DAY_COLOR, dayFactor)
-  scene.fog.color.copy(FOG_NIGHT_COLOR)
-  scene.fog.color.lerp(FOG_DUSK_COLOR, duskFactor * 0.72)
-  scene.fog.color.lerp(FOG_DAY_COLOR, dayFactor)
-  scene.fog.near = THREE.MathUtils.lerp(0.45, 35, dayFactor)
-  scene.fog.far = THREE.MathUtils.lerp(8.5, 80, dayFactor)
-
-  hemiLight.intensity = THREE.MathUtils.lerp(0.008, 0.6, dayFactor)
-  sunLight.position.copy(sunOrb.position)
-  sunLightTarget.position.set(state.playerPosition.x, 0.8, state.playerPosition.z)
-  sunLight.intensity = THREE.MathUtils.lerp(0.01, 1.2, dayFactor)
-  sunLight.color.copy(SUN_NIGHT_COLOR).lerp(SUN_DAY_COLOR, dayFactor)
-  moonLight.position.copy(moonOrb.position)
-  moonLightTarget.position.set(state.playerPosition.x, 0.8, state.playerPosition.z)
-  moonLight.intensity = THREE.MathUtils.lerp(0.015, 0.34, nightFactor * THREE.MathUtils.clamp((moonHeight + 0.18) / 1.18, 0, 1))
-  moonLight.color.copy(MOON_DAY_COLOR).lerp(MOON_NIGHT_COLOR, nightFactor)
-  updateNightAmbience(nightFactor, nowSeconds, deltaSeconds)
-
-  const nightDemand = THREE.MathUtils.smoothstep(nightFactor, 0.3, 1)
-  const drainRate = FLASHLIGHT_DRAIN_RATE * nightDemand
-  const rechargeRate = FLASHLIGHT_RECHARGE_RATE * dayFactor
-  let batteryDelta = rechargeRate - drainRate
-  if (!state.running || state.ended) {
-    batteryDelta = rechargeRate * 0.6
-  }
-  flashlightState.battery = THREE.MathUtils.clamp(
-    flashlightState.battery + batteryDelta * deltaSeconds,
-    0.08,
-    1
-  )
-  const effectIntensity = flashlightState.effectIntensity
-  const lowBatteryThreshold = THREE.MathUtils.clamp(0.55 + effectIntensity * 0.18, 0.45, 0.9)
-  const lowBatteryFactor = THREE.MathUtils.clamp(
-    (lowBatteryThreshold - flashlightState.battery) / lowBatteryThreshold,
-    0,
-    1
-  )
-  const randomFlickerChance = THREE.MathUtils.clamp(
-    (0.12 + lowBatteryFactor * 0.42) * effectIntensity,
-    0.06,
-    0.97
-  )
-  flashlightState.flickerTimeLeft -= deltaSeconds
-  if (flashlightState.flickerTimeLeft <= 0) {
-    if (Math.random() < randomFlickerChance) {
-      flashlightState.flickerMultiplier = THREE.MathUtils.randFloat(
-        Math.max(0.01, 0.03 - (effectIntensity - 1) * 0.01),
-        THREE.MathUtils.lerp(0.8, 0.28, lowBatteryFactor) / Math.max(0.7, effectIntensity * 0.9)
-      )
-      flashlightState.flickerTimeLeft = THREE.MathUtils.randFloat(0.012, 0.06) / Math.sqrt(effectIntensity)
-    } else {
-      flashlightState.flickerMultiplier = THREE.MathUtils.randFloat(
-        Math.max(0.62, 0.88 - (effectIntensity - 1) * 0.18),
-        1
-      )
-      flashlightState.flickerTimeLeft = THREE.MathUtils.randFloat(0.03, 0.12) / Math.sqrt(effectIntensity)
-    }
-  }
-  const electricHum =
-    1 - lowBatteryFactor * (0.07 + Math.pow(Math.sin(nowSeconds * (67.4 + effectIntensity * 6)), 2) * 0.16)
-  const flashlightPower = THREE.MathUtils.lerp(0.2, 1, Math.pow(flashlightState.battery, 0.56))
-  const flickerMultiplier = THREE.MathUtils.clamp(
-    flashlightState.flickerMultiplier * electricHum,
-    0.03,
-    1
-  )
-  const jitterAmplitude = (0.016 + lowBatteryFactor * 0.16) * effectIntensity
-  const jitterX =
-    (Math.sin(nowSeconds * 19.3) * 0.45 + Math.sin(nowSeconds * 31.7 + 1.2) * 0.55) *
-    jitterAmplitude
-  const jitterY =
-    (Math.cos(nowSeconds * 16.5 + 0.4) * 0.35 + Math.sin(nowSeconds * 27.1 + 2.6) * 0.65) *
-    jitterAmplitude
-
-  flashlight.intensity =
-    THREE.MathUtils.lerp(6.6, 0, Math.pow(dayFactor, 1.35)) *
-    flashlightPower *
-    flickerMultiplier
-  flashlight.distance = THREE.MathUtils.lerp(13.8, 3.1, dayFactor)
-  flashlight.angle =
-    THREE.MathUtils.lerp(Math.PI / 15.8, Math.PI / 8.6, dayFactor) +
-    lowBatteryFactor * 0.012 * effectIntensity * Math.sin(nowSeconds * 23.8)
-  flashlight.penumbra = THREE.MathUtils.lerp(0.84, 0.28, dayFactor)
-  flashlight.decay = THREE.MathUtils.lerp(1.24, 1.62, dayFactor)
-  flashlightTarget.position.set(
-    jitterX,
-    -THREE.MathUtils.lerp(0.24, 0.07, dayFactor) + jitterY * 0.9,
-    -THREE.MathUtils.lerp(9.1, 3.6, dayFactor)
-  )
-
-  flashlightFocus.intensity =
-    THREE.MathUtils.lerp(3.4, 0, Math.pow(dayFactor, 1.5)) *
-    flashlightPower *
-    THREE.MathUtils.lerp(0.82, 1.14, flickerMultiplier)
-  flashlightFocus.distance = THREE.MathUtils.lerp(19, 3.3, dayFactor)
-  flashlightFocus.angle = THREE.MathUtils.lerp(Math.PI / 28, Math.PI / 18, dayFactor)
-  flashlightFocus.penumbra = THREE.MathUtils.lerp(0.44, 0.22, dayFactor)
-  flashlightFocus.decay = THREE.MathUtils.lerp(1.05, 1.6, dayFactor)
-  flashlightFocusTarget.position.set(
-    jitterX * 0.75,
-    -THREE.MathUtils.lerp(0.11, 0.03, dayFactor) + jitterY * 0.56,
-    -THREE.MathUtils.lerp(13.7, 4.5, dayFactor)
-  )
-}
-
-function updatePeaceLighthouse() {
-  const nowSeconds = performance.now() * 0.001
-  const nightFactor = 1 - dayNightState.dayFactor
-  const sweepAngle = nowSeconds * PEACE_SEARCHLIGHT_SWEEP_SPEED
-  const sweepRadius = 10.8
-  const targetX = PEACE_EXIT_POSITION.x - 0.5 + Math.cos(sweepAngle) * sweepRadius
-  const targetZ =
-    PEACE_EXIT_POSITION.z - 0.4 +
-    Math.sin(sweepAngle * 0.78 + 1.2) * sweepRadius * 0.72
-  peaceState.spotlightTarget.position.set(targetX, 0.15, targetZ)
-
-  peaceState.lighthouse.rotation.y = Math.sin(nowSeconds * 0.14) * 0.035
-  peaceState.spotlight.intensity = THREE.MathUtils.lerp(1.1, 3.6, nightFactor)
-  peaceState.spotlight.distance = THREE.MathUtils.lerp(23, 36, nightFactor)
-  peaceState.spotlight.angle = THREE.MathUtils.lerp(Math.PI / 8.4, Math.PI / 6.1, nightFactor)
-
-  const pulse = 0.75 + Math.sin(nowSeconds * 2.3) * 0.17 + Math.sin(nowSeconds * 3.8 + 0.6) * 0.08
-  peaceState.zoneMaterial.opacity = THREE.MathUtils.clamp(0.16 + nightFactor * 0.12 + pulse * 0.2, 0.12, 0.74)
-  peaceState.beaconGlowMaterial.emissiveIntensity =
-    THREE.MathUtils.lerp(0.8, 1.95, nightFactor) * (0.88 + Math.sin(nowSeconds * 1.8 + 0.4) * 0.12)
-}
-
-function checkPeacefulWinCondition() {
-  const dx = state.playerPosition.x - PEACE_EXIT_POSITION.x
-  const dz = state.playerPosition.z - PEACE_EXIT_POSITION.z
-  return dx * dx + dz * dz <= PEACE_EXIT_TRIGGER_RADIUS * PEACE_EXIT_TRIGGER_RADIUS
-}
+const { updatePeaceLighthouse, checkPeacefulWinCondition } = peaceSystem
 
 function spawnEnemy() {
   const mesh = new THREE.Group()
@@ -1418,120 +895,25 @@ function handleShoot() {
 }
 
 function processInput(delta) {
-  const moveSpeed = 10
-  const moveForward = new THREE.Vector3()
-  const moveRight = new THREE.Vector3()
-
-  camera.getWorldDirection(moveForward)
-  moveForward.y = 0
-  moveForward.normalize()
-
-  moveRight.crossVectors(moveForward, new THREE.Vector3(0, 1, 0)).normalize()
-
-  const direction = new THREE.Vector3()
-  if (keys.KeyW) direction.add(moveForward)
-  if (keys.KeyS) direction.sub(moveForward)
-  if (keys.KeyA) direction.sub(moveRight)
-  if (keys.KeyD) direction.add(moveRight)
-
-  const feetY = state.playerPosition.y - PLAYER_HEIGHT
-  let nextX = state.playerPosition.x
-  let nextZ = state.playerPosition.z
-
-  if (direction.lengthSq() > 0) {
-    direction.normalize().multiplyScalar(moveSpeed * delta)
-    nextX += direction.x
-    nextZ += direction.z
-  }
-
-  const xDelta = nextX - state.playerPosition.x
-  if (xDelta !== 0) {
-    for (const collider of staticColliders) {
-      if (!colliderBlocksSide(collider, feetY)) {
-        continue
-      }
-
-      if (overlapsColliderXZ(nextX, state.playerPosition.z, PLAYER_COLLIDER_RADIUS, collider)) {
-        if (xDelta > 0) {
-          nextX = collider.minX - PLAYER_COLLIDER_RADIUS - COLLISION_EPSILON
-        } else {
-          nextX = collider.maxX + PLAYER_COLLIDER_RADIUS + COLLISION_EPSILON
-        }
-      }
-    }
-  }
-
-  const zDelta = nextZ - state.playerPosition.z
-  if (zDelta !== 0) {
-    for (const collider of staticColliders) {
-      if (!colliderBlocksSide(collider, feetY)) {
-        continue
-      }
-
-      if (overlapsColliderXZ(nextX, nextZ, PLAYER_COLLIDER_RADIUS, collider)) {
-        if (zDelta > 0) {
-          nextZ = collider.minZ - PLAYER_COLLIDER_RADIUS - COLLISION_EPSILON
-        } else {
-          nextZ = collider.maxZ + PLAYER_COLLIDER_RADIUS + COLLISION_EPSILON
-        }
-      }
-    }
-  }
-
-  state.playerPosition.x = THREE.MathUtils.clamp(nextX, -31.5, 31.5)
-  state.playerPosition.z = THREE.MathUtils.clamp(nextZ, -31.5, 31.5)
-
-  if (keys.Space && state.onGround) {
-    state.verticalVelocity = PLAYER_JUMP_SPEED
-    state.onGround = false
-  }
-
-  const previousFeetY = state.playerPosition.y - PLAYER_HEIGHT
-  const previousTopY = previousFeetY + PLAYER_COLLIDER_BODY_HEIGHT
-  state.verticalVelocity -= PLAYER_GRAVITY * delta
-  state.playerPosition.y += state.verticalVelocity * delta
-  const nextFeetY = state.playerPosition.y - PLAYER_HEIGHT
-  const nextTopY = nextFeetY + PLAYER_COLLIDER_BODY_HEIGHT
-  let landingY = 0
-
-  for (const collider of staticColliders) {
-    if (!overlapsColliderXZ(state.playerPosition.x, state.playerPosition.z, PLAYER_COLLIDER_RADIUS, collider)) {
-      continue
-    }
-
-    if (
-      state.verticalVelocity <= 0 &&
-      previousFeetY >= collider.maxY - 0.18 &&
-      nextFeetY <= collider.maxY + 0.04
-    ) {
-      landingY = Math.max(landingY, collider.maxY)
-      continue
-    }
-
-    if (
-      state.verticalVelocity > 0 &&
-      previousTopY <= collider.minY + 0.05 &&
-      nextTopY >= collider.minY - 0.01
-    ) {
-      state.playerPosition.y =
-        collider.minY - PLAYER_COLLIDER_BODY_HEIGHT + PLAYER_HEIGHT - COLLISION_EPSILON
-      state.verticalVelocity = Math.min(0, state.verticalVelocity)
-    }
-  }
-
-  if (nextFeetY <= landingY + 0.04) {
-    state.playerPosition.y = landingY + PLAYER_HEIGHT
-    state.verticalVelocity = 0
-    state.onGround = true
-  } else if (state.playerPosition.y <= PLAYER_HEIGHT) {
-    state.playerPosition.y = PLAYER_HEIGHT
-    state.verticalVelocity = 0
-    state.onGround = true
-  } else {
-    state.onGround = false
-  }
-
-  camera.position.copy(state.playerPosition)
+  processPlayerInput({
+    THREE,
+    delta,
+    camera,
+    keys,
+    state,
+    staticColliders,
+    constants: {
+      moveSpeed: PLAYER_MOVE_SPEED,
+      playerHeight: PLAYER_HEIGHT,
+      playerGravity: PLAYER_GRAVITY,
+      playerJumpSpeed: PLAYER_JUMP_SPEED,
+      playerColliderRadius: PLAYER_COLLIDER_RADIUS,
+      playerColliderBodyHeight: PLAYER_COLLIDER_BODY_HEIGHT,
+      playerStepHeight: PLAYER_STEP_HEIGHT,
+      collisionEpsilon: COLLISION_EPSILON,
+      worldClamp: WORLD_CLAMP,
+    },
+  })
 }
 
 function updateEnemies(delta) {
@@ -1649,7 +1031,7 @@ function updateRoundState(delta) {
   }
 
   processInput(delta)
-  if (checkPeacefulWinCondition()) {
+  if (checkPeacefulWinCondition(state.playerPosition)) {
     endRound(true, '你抵达了角落灯塔，成功和平撤离')
     return
   }
