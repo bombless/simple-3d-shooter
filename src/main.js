@@ -153,6 +153,7 @@ scene.add(moonOrb)
 
 const world = new THREE.Group()
 scene.add(world)
+const staticColliders = []
 
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(120, 120, 20, 20),
@@ -176,6 +177,7 @@ for (let i = 0; i < 22; i += 1) {
   block.castShadow = true
   block.receiveShadow = true
   world.add(block)
+  addStaticBoxCollider(block.position, width, height, depth)
 }
 
 const boundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
@@ -212,6 +214,9 @@ const keys = {
 }
 
 const PLAYER_HEIGHT = 1.7
+const PLAYER_COLLIDER_RADIUS = 0.36
+const PLAYER_COLLIDER_BODY_HEIGHT = 1.72
+const PLAYER_STEP_HEIGHT = 0.28
 const PLAYER_GRAVITY = 28
 const PLAYER_JUMP_SPEED = 10.5
 const BLOOD_GRAVITY = 22
@@ -219,6 +224,7 @@ const BLOOD_LIFETIME = 0.55
 const CAMERA_SHAKE_DECAY = 3.6
 const ENEMY_BASE_HEIGHT = 0.88
 const BLOOD_PARTICLE_GEOMETRY = new THREE.SphereGeometry(0.09, 6, 6)
+const COLLISION_EPSILON = 0.001
 
 const state = {
   running: false,
@@ -285,6 +291,33 @@ function updateEffectUi() {
   fxMeterFillEl.style.height = `${(clampedRatio * 100).toFixed(1)}%`
   fxMeterFillEl.style.background = `linear-gradient(180deg, ${effectColor}, rgba(255,255,255,0.9))`
   fxMeterValueEl.style.color = effectColor
+}
+
+function addStaticBoxCollider(center, width, height, depth) {
+  staticColliders.push({
+    minX: center.x - width / 2,
+    maxX: center.x + width / 2,
+    minZ: center.z - depth / 2,
+    maxZ: center.z + depth / 2,
+    minY: center.y - height / 2,
+    maxY: center.y + height / 2,
+  })
+}
+
+function overlapsColliderXZ(x, z, radius, collider) {
+  return (
+    x + radius > collider.minX &&
+    x - radius < collider.maxX &&
+    z + radius > collider.minZ &&
+    z - radius < collider.maxZ
+  )
+}
+
+function colliderBlocksSide(collider, feetY) {
+  return (
+    feetY < collider.maxY - PLAYER_STEP_HEIGHT &&
+    feetY + PLAYER_COLLIDER_BODY_HEIGHT > collider.minY + 0.02
+  )
 }
 
 function adjustFlashlightEffectIntensity(delta) {
@@ -1294,25 +1327,101 @@ function processInput(delta) {
   if (keys.KeyA) direction.sub(moveRight)
   if (keys.KeyD) direction.add(moveRight)
 
+  const feetY = state.playerPosition.y - PLAYER_HEIGHT
+  let nextX = state.playerPosition.x
+  let nextZ = state.playerPosition.z
+
   if (direction.lengthSq() > 0) {
     direction.normalize().multiplyScalar(moveSpeed * delta)
-    state.playerPosition.add(direction)
-    state.playerPosition.x = THREE.MathUtils.clamp(state.playerPosition.x, -31.5, 31.5)
-    state.playerPosition.z = THREE.MathUtils.clamp(state.playerPosition.z, -31.5, 31.5)
+    nextX += direction.x
+    nextZ += direction.z
   }
+
+  const xDelta = nextX - state.playerPosition.x
+  if (xDelta !== 0) {
+    for (const collider of staticColliders) {
+      if (!colliderBlocksSide(collider, feetY)) {
+        continue
+      }
+
+      if (overlapsColliderXZ(nextX, state.playerPosition.z, PLAYER_COLLIDER_RADIUS, collider)) {
+        if (xDelta > 0) {
+          nextX = collider.minX - PLAYER_COLLIDER_RADIUS - COLLISION_EPSILON
+        } else {
+          nextX = collider.maxX + PLAYER_COLLIDER_RADIUS + COLLISION_EPSILON
+        }
+      }
+    }
+  }
+
+  const zDelta = nextZ - state.playerPosition.z
+  if (zDelta !== 0) {
+    for (const collider of staticColliders) {
+      if (!colliderBlocksSide(collider, feetY)) {
+        continue
+      }
+
+      if (overlapsColliderXZ(nextX, nextZ, PLAYER_COLLIDER_RADIUS, collider)) {
+        if (zDelta > 0) {
+          nextZ = collider.minZ - PLAYER_COLLIDER_RADIUS - COLLISION_EPSILON
+        } else {
+          nextZ = collider.maxZ + PLAYER_COLLIDER_RADIUS + COLLISION_EPSILON
+        }
+      }
+    }
+  }
+
+  state.playerPosition.x = THREE.MathUtils.clamp(nextX, -31.5, 31.5)
+  state.playerPosition.z = THREE.MathUtils.clamp(nextZ, -31.5, 31.5)
 
   if (keys.Space && state.onGround) {
     state.verticalVelocity = PLAYER_JUMP_SPEED
     state.onGround = false
   }
 
+  const previousFeetY = state.playerPosition.y - PLAYER_HEIGHT
+  const previousTopY = previousFeetY + PLAYER_COLLIDER_BODY_HEIGHT
   state.verticalVelocity -= PLAYER_GRAVITY * delta
   state.playerPosition.y += state.verticalVelocity * delta
+  const nextFeetY = state.playerPosition.y - PLAYER_HEIGHT
+  const nextTopY = nextFeetY + PLAYER_COLLIDER_BODY_HEIGHT
+  let landingY = 0
 
-  if (state.playerPosition.y <= PLAYER_HEIGHT) {
+  for (const collider of staticColliders) {
+    if (!overlapsColliderXZ(state.playerPosition.x, state.playerPosition.z, PLAYER_COLLIDER_RADIUS, collider)) {
+      continue
+    }
+
+    if (
+      state.verticalVelocity <= 0 &&
+      previousFeetY >= collider.maxY - 0.18 &&
+      nextFeetY <= collider.maxY + 0.04
+    ) {
+      landingY = Math.max(landingY, collider.maxY)
+      continue
+    }
+
+    if (
+      state.verticalVelocity > 0 &&
+      previousTopY <= collider.minY + 0.05 &&
+      nextTopY >= collider.minY - 0.01
+    ) {
+      state.playerPosition.y =
+        collider.minY - PLAYER_COLLIDER_BODY_HEIGHT + PLAYER_HEIGHT - COLLISION_EPSILON
+      state.verticalVelocity = Math.min(0, state.verticalVelocity)
+    }
+  }
+
+  if (nextFeetY <= landingY + 0.04) {
+    state.playerPosition.y = landingY + PLAYER_HEIGHT
+    state.verticalVelocity = 0
+    state.onGround = true
+  } else if (state.playerPosition.y <= PLAYER_HEIGHT) {
     state.playerPosition.y = PLAYER_HEIGHT
     state.verticalVelocity = 0
     state.onGround = true
+  } else {
+    state.onGround = false
   }
 
   camera.position.copy(state.playerPosition)
