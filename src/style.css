@@ -44,6 +44,94 @@ canvas {
   opacity: 0.9;
 }
 
+#fx-controls {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(4, 12, 26, 0.45);
+  border: 1px solid rgba(208, 228, 255, 0.24);
+}
+
+#fx-controls button {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #e9f3ff;
+  background: rgba(65, 110, 185, 0.66);
+  cursor: pointer;
+}
+
+#fx-controls button:hover {
+  background: rgba(92, 142, 225, 0.8);
+}
+
+#fx-label {
+  min-width: 72px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+#fx-meter {
+  position: fixed;
+  top: 78px;
+  right: 12px;
+  width: 76px;
+  height: min(74vh, 540px);
+  z-index: 14;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(6, 14, 28, 0.68), rgba(6, 14, 28, 0.4));
+  border: 1px solid rgba(202, 225, 255, 0.22);
+}
+
+#fx-meter-title {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  opacity: 0.86;
+}
+
+#fx-meter-track {
+  position: relative;
+  flex: 1;
+  width: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(229, 242, 255, 0.45);
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+#fx-meter-fill {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 22%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #57cbff, #e8f7ff);
+  box-shadow: 0 0 10px rgba(105, 188, 255, 0.5);
+  transition: height 100ms linear, background 100ms linear;
+}
+
+#fx-meter-value {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+
 #crosshair {
   position: fixed;
   top: 50%;
@@ -147,5 +235,21 @@ canvas {
 
   #tips {
     font-size: 12px;
+  }
+
+  #fx-controls {
+    margin-top: 8px;
+    padding: 5px 9px;
+  }
+
+  #fx-meter {
+    top: 84px;
+    right: 8px;
+    width: 64px;
+    height: min(58vh, 420px);
+  }
+
+  #fx-meter-value {
+    font-size: 13px;
   }
 }

@@ -6,6 +6,18 @@ app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
     <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | Esc 暂停 | R 重开</div>
+    <div id="fx-controls">
+      <button id="fx-dec" type="button" aria-label="降低效果强度">-</button>
+      <span id="fx-label">FX 1.0x</span>
+      <button id="fx-inc" type="button" aria-label="提高效果强度">=</button>
+    </div>
+    <div id="fx-meter" aria-hidden="true">
+      <div id="fx-meter-title">FX LEVEL</div>
+      <div id="fx-meter-track">
+        <div id="fx-meter-fill"></div>
+      </div>
+      <div id="fx-meter-value">1.0x</div>
+    </div>
   </div>
   <div id="crosshair"></div>
   <div id="message" class="visible">
@@ -19,8 +31,18 @@ app.innerHTML = `
 const statsEl = document.querySelector('#stats')
 const messageEl = document.querySelector('#message')
 const startBtn = document.querySelector('#start-btn')
+const fxDecBtn = document.querySelector('#fx-dec')
+const fxIncBtn = document.querySelector('#fx-inc')
+const fxLabelEl = document.querySelector('#fx-label')
+const fxMeterFillEl = document.querySelector('#fx-meter-fill')
+const fxMeterValueEl = document.querySelector('#fx-meter-value')
 
 const DAY_NIGHT_CYCLE_SECONDS = 50
+const FLASHLIGHT_DRAIN_RATE = 0.028
+const FLASHLIGHT_RECHARGE_RATE = 0.018
+const FLASHLIGHT_EFFECT_INTENSITY_MIN = 0.4
+const FLASHLIGHT_EFFECT_INTENSITY_MAX = 3
+const FLASHLIGHT_EFFECT_INTENSITY_STEP = 0.2
 const SKY_DAY_COLOR = new THREE.Color(0x89b2ff)
 const SKY_DUSK_COLOR = new THREE.Color(0x2d3a63)
 const SKY_NIGHT_COLOR = new THREE.Color(0x03050a)
@@ -34,6 +56,13 @@ const MOON_NIGHT_COLOR = new THREE.Color(0xaec5ff)
 const dayNightState = {
   startedAtMs: performance.now(),
   dayFactor: 0,
+}
+const flashlightState = {
+  battery: 1,
+  lastUpdateMs: performance.now(),
+  flickerTimeLeft: 0,
+  flickerMultiplier: 1,
+  effectIntensity: 1,
 }
 const CELESTIAL_ORBIT_RADIUS = 58
 const CELESTIAL_ORBIT_TILT = 0.42
@@ -75,14 +104,27 @@ const moonLightTarget = new THREE.Object3D()
 scene.add(moonLightTarget)
 moonLight.target = moonLightTarget
 
-const flashlight = new THREE.SpotLight(0xeef4ff, 0, 11.5, Math.PI / 11.5, 0.72, 1.45)
-flashlight.position.set(0, -0.06, 0)
+const flashlightCookie = createFlashlightCookieTexture()
+const flashlight = new THREE.SpotLight(0xeef4ff, 0, 12.4, Math.PI / 13.5, 0.82, 1.28)
+flashlight.position.set(0, -0.08, 0)
 flashlight.castShadow = false
 const flashlightTarget = new THREE.Object3D()
-flashlightTarget.position.set(0, -0.14, -6.4)
+flashlightTarget.position.set(0, -0.24, -8.9)
 camera.add(flashlight)
 camera.add(flashlightTarget)
 flashlight.target = flashlightTarget
+if (flashlightCookie) {
+  flashlight.map = flashlightCookie
+}
+
+const flashlightFocus = new THREE.SpotLight(0xf4f8ff, 0, 18, Math.PI / 27, 0.42, 1.08)
+flashlightFocus.position.set(0, -0.07, 0)
+flashlightFocus.castShadow = false
+const flashlightFocusTarget = new THREE.Object3D()
+flashlightFocusTarget.position.set(0, -0.11, -13.6)
+camera.add(flashlightFocus)
+camera.add(flashlightFocusTarget)
+flashlightFocus.target = flashlightFocusTarget
 
 const sunOrbMaterial = new THREE.MeshBasicMaterial({ color: 0xfff1b6, transparent: true, opacity: 1 })
 sunOrbMaterial.fog = false
@@ -197,6 +239,77 @@ const tempEnemyEyeQuaternion = new THREE.Quaternion()
 
 function normalizeAngle(angle) {
   return Math.atan2(Math.sin(angle), Math.cos(angle))
+}
+
+function updateEffectUi() {
+  const intensityText = flashlightState.effectIntensity.toFixed(1)
+  const ratio =
+    (flashlightState.effectIntensity - FLASHLIGHT_EFFECT_INTENSITY_MIN) /
+    (FLASHLIGHT_EFFECT_INTENSITY_MAX - FLASHLIGHT_EFFECT_INTENSITY_MIN)
+  const clampedRatio = THREE.MathUtils.clamp(ratio, 0, 1)
+  const hue = THREE.MathUtils.lerp(190, 8, clampedRatio)
+  const saturation = THREE.MathUtils.lerp(72, 90, clampedRatio)
+  const lightness = THREE.MathUtils.lerp(58, 52, clampedRatio)
+  const effectColor = `hsl(${hue.toFixed(0)} ${saturation.toFixed(0)}% ${lightness.toFixed(0)}%)`
+
+  fxLabelEl.textContent = `FX ${intensityText}x`
+  fxMeterValueEl.textContent = `${intensityText}x`
+  fxMeterFillEl.style.height = `${(clampedRatio * 100).toFixed(1)}%`
+  fxMeterFillEl.style.background = `linear-gradient(180deg, ${effectColor}, rgba(255,255,255,0.9))`
+  fxMeterValueEl.style.color = effectColor
+}
+
+function adjustFlashlightEffectIntensity(delta) {
+  const nextValue = THREE.MathUtils.clamp(
+    Math.round((flashlightState.effectIntensity + delta) * 10) / 10,
+    FLASHLIGHT_EFFECT_INTENSITY_MIN,
+    FLASHLIGHT_EFFECT_INTENSITY_MAX
+  )
+
+  if (nextValue === flashlightState.effectIntensity) {
+    return
+  }
+
+  flashlightState.effectIntensity = nextValue
+  updateEffectUi()
+}
+
+function createFlashlightCookieTexture() {
+  const size = 256
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+
+  if (!ctx) {
+    return null
+  }
+
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, size, size)
+
+  const centerX = size * 0.5
+  const centerY = size * 0.52
+  const radiusX = size * 0.26
+  const radiusY = size * 0.44
+  const gradient = ctx.createRadialGradient(centerX, centerY, radiusX * 0.06, centerX, centerY, radiusY)
+  gradient.addColorStop(0, 'rgba(255,255,255,1)')
+  gradient.addColorStop(0.45, 'rgba(255,255,255,0.95)')
+  gradient.addColorStop(0.78, 'rgba(255,255,255,0.45)')
+  gradient.addColorStop(1, 'rgba(0,0,0,0)')
+
+  ctx.save()
+  ctx.translate(centerX, centerY)
+  ctx.scale(1, radiusY / radiusX)
+  ctx.beginPath()
+  ctx.arc(0, 0, radiusX, 0, Math.PI * 2)
+  ctx.fillStyle = gradient
+  ctx.fill()
+  ctx.restore()
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.needsUpdate = true
+  return texture
 }
 
 function randomSpawn() {
@@ -370,7 +483,12 @@ function applyCameraShake(delta) {
 }
 
 function updateDayNightCycle() {
-  const elapsedSeconds = (performance.now() - dayNightState.startedAtMs) / 1000
+  const nowMs = performance.now()
+  const nowSeconds = nowMs * 0.001
+  const deltaSeconds = Math.min(0.05, Math.max(0, (nowMs - flashlightState.lastUpdateMs) / 1000))
+  flashlightState.lastUpdateMs = nowMs
+
+  const elapsedSeconds = (nowMs - dayNightState.startedAtMs) / 1000
   const cycleProgress = (elapsedSeconds % DAY_NIGHT_CYCLE_SECONDS) / DAY_NIGHT_CYCLE_SECONDS
   const orbitAngle = cycleProgress * Math.PI * 2 - Math.PI / 2
   const sunHeight = Math.sin(orbitAngle)
@@ -424,12 +542,91 @@ function updateDayNightCycle() {
   moonLight.intensity = THREE.MathUtils.lerp(0.015, 0.34, nightFactor * THREE.MathUtils.clamp((moonHeight + 0.18) / 1.18, 0, 1))
   moonLight.color.copy(MOON_DAY_COLOR).lerp(MOON_NIGHT_COLOR, nightFactor)
 
-  flashlight.intensity = THREE.MathUtils.lerp(5.8, 0, Math.pow(dayFactor, 1.35))
-  flashlight.distance = THREE.MathUtils.lerp(10.8, 2.5, dayFactor)
-  flashlight.angle = THREE.MathUtils.lerp(Math.PI / 12.2, Math.PI / 7.2, dayFactor)
-  flashlight.penumbra = THREE.MathUtils.lerp(0.75, 0.25, dayFactor)
-  flashlight.decay = THREE.MathUtils.lerp(1.35, 1.6, dayFactor)
-  flashlightTarget.position.set(0, -THREE.MathUtils.lerp(0.14, 0.05, dayFactor), -THREE.MathUtils.lerp(6.4, 3.4, dayFactor))
+  const nightDemand = THREE.MathUtils.smoothstep(nightFactor, 0.3, 1)
+  const drainRate = FLASHLIGHT_DRAIN_RATE * nightDemand
+  const rechargeRate = FLASHLIGHT_RECHARGE_RATE * dayFactor
+  let batteryDelta = rechargeRate - drainRate
+  if (!state.running || state.ended) {
+    batteryDelta = rechargeRate * 0.6
+  }
+  flashlightState.battery = THREE.MathUtils.clamp(
+    flashlightState.battery + batteryDelta * deltaSeconds,
+    0.08,
+    1
+  )
+  const effectIntensity = flashlightState.effectIntensity
+  const lowBatteryThreshold = THREE.MathUtils.clamp(0.55 + effectIntensity * 0.18, 0.45, 0.9)
+  const lowBatteryFactor = THREE.MathUtils.clamp(
+    (lowBatteryThreshold - flashlightState.battery) / lowBatteryThreshold,
+    0,
+    1
+  )
+  const randomFlickerChance = THREE.MathUtils.clamp(
+    (0.12 + lowBatteryFactor * 0.42) * effectIntensity,
+    0.06,
+    0.97
+  )
+  flashlightState.flickerTimeLeft -= deltaSeconds
+  if (flashlightState.flickerTimeLeft <= 0) {
+    if (Math.random() < randomFlickerChance) {
+      flashlightState.flickerMultiplier = THREE.MathUtils.randFloat(
+        Math.max(0.01, 0.03 - (effectIntensity - 1) * 0.01),
+        THREE.MathUtils.lerp(0.8, 0.28, lowBatteryFactor) / Math.max(0.7, effectIntensity * 0.9)
+      )
+      flashlightState.flickerTimeLeft = THREE.MathUtils.randFloat(0.012, 0.06) / Math.sqrt(effectIntensity)
+    } else {
+      flashlightState.flickerMultiplier = THREE.MathUtils.randFloat(
+        Math.max(0.62, 0.88 - (effectIntensity - 1) * 0.18),
+        1
+      )
+      flashlightState.flickerTimeLeft = THREE.MathUtils.randFloat(0.03, 0.12) / Math.sqrt(effectIntensity)
+    }
+  }
+  const electricHum =
+    1 - lowBatteryFactor * (0.07 + Math.pow(Math.sin(nowSeconds * (67.4 + effectIntensity * 6)), 2) * 0.16)
+  const flashlightPower = THREE.MathUtils.lerp(0.2, 1, Math.pow(flashlightState.battery, 0.56))
+  const flickerMultiplier = THREE.MathUtils.clamp(
+    flashlightState.flickerMultiplier * electricHum,
+    0.03,
+    1
+  )
+  const jitterAmplitude = (0.016 + lowBatteryFactor * 0.16) * effectIntensity
+  const jitterX =
+    (Math.sin(nowSeconds * 19.3) * 0.45 + Math.sin(nowSeconds * 31.7 + 1.2) * 0.55) *
+    jitterAmplitude
+  const jitterY =
+    (Math.cos(nowSeconds * 16.5 + 0.4) * 0.35 + Math.sin(nowSeconds * 27.1 + 2.6) * 0.65) *
+    jitterAmplitude
+
+  flashlight.intensity =
+    THREE.MathUtils.lerp(6.6, 0, Math.pow(dayFactor, 1.35)) *
+    flashlightPower *
+    flickerMultiplier
+  flashlight.distance = THREE.MathUtils.lerp(13.8, 3.1, dayFactor)
+  flashlight.angle =
+    THREE.MathUtils.lerp(Math.PI / 15.8, Math.PI / 8.6, dayFactor) +
+    lowBatteryFactor * 0.012 * effectIntensity * Math.sin(nowSeconds * 23.8)
+  flashlight.penumbra = THREE.MathUtils.lerp(0.84, 0.28, dayFactor)
+  flashlight.decay = THREE.MathUtils.lerp(1.24, 1.62, dayFactor)
+  flashlightTarget.position.set(
+    jitterX,
+    -THREE.MathUtils.lerp(0.24, 0.07, dayFactor) + jitterY * 0.9,
+    -THREE.MathUtils.lerp(9.1, 3.6, dayFactor)
+  )
+
+  flashlightFocus.intensity =
+    THREE.MathUtils.lerp(3.4, 0, Math.pow(dayFactor, 1.5)) *
+    flashlightPower *
+    THREE.MathUtils.lerp(0.82, 1.14, flickerMultiplier)
+  flashlightFocus.distance = THREE.MathUtils.lerp(19, 3.3, dayFactor)
+  flashlightFocus.angle = THREE.MathUtils.lerp(Math.PI / 28, Math.PI / 18, dayFactor)
+  flashlightFocus.penumbra = THREE.MathUtils.lerp(0.44, 0.22, dayFactor)
+  flashlightFocus.decay = THREE.MathUtils.lerp(1.05, 1.6, dayFactor)
+  flashlightFocusTarget.position.set(
+    jitterX * 0.75,
+    -THREE.MathUtils.lerp(0.11, 0.03, dayFactor) + jitterY * 0.56,
+    -THREE.MathUtils.lerp(13.7, 4.5, dayFactor)
+  )
 }
 
 function spawnEnemy() {
@@ -742,6 +939,10 @@ function resetRound() {
   state.shakeAmount = 0
   state.yaw = 0
   state.pitch = 0
+  flashlightState.battery = 1
+  flashlightState.flickerTimeLeft = 0
+  flashlightState.flickerMultiplier = 1
+  flashlightState.lastUpdateMs = performance.now()
   state.playerPosition.set(0, PLAYER_HEIGHT, 12)
   camera.position.copy(state.playerPosition)
   camera.rotation.set(0, 0, 0)
@@ -810,7 +1011,8 @@ function endRound(victory, reason) {
 
 function updateHud() {
   const phaseLabel = dayNightState.dayFactor < 0.35 ? 'NIGHT' : dayNightState.dayFactor < 0.65 ? 'DUSK' : 'DAY'
-  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel}`
+  const torchLabel = `${Math.round(flashlightState.battery * 100)}%`
+  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel} | TORCH: ${torchLabel}`
 }
 
 function handleShoot() {
@@ -1013,6 +1215,16 @@ function updateRoundState(delta) {
 }
 
 window.addEventListener('keydown', (event) => {
+  if (event.code === 'Minus') {
+    adjustFlashlightEffectIntensity(-FLASHLIGHT_EFFECT_INTENSITY_STEP)
+    return
+  }
+
+  if (event.code === 'Equal') {
+    adjustFlashlightEffectIntensity(FLASHLIGHT_EFFECT_INTENSITY_STEP)
+    return
+  }
+
   if (event.code in keys) {
     keys[event.code] = true
   }
@@ -1079,6 +1291,8 @@ document.addEventListener('pointerlockchange', () => {
 })
 
 startBtn.addEventListener('click', beginRound)
+fxDecBtn.addEventListener('click', () => adjustFlashlightEffectIntensity(-FLASHLIGHT_EFFECT_INTENSITY_STEP))
+fxIncBtn.addEventListener('click', () => adjustFlashlightEffectIntensity(FLASHLIGHT_EFFECT_INTENSITY_STEP))
 
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
@@ -1090,6 +1304,7 @@ function animate() {
   requestAnimationFrame(animate)
 }
 
+updateEffectUi()
 updateDayNightCycle()
 resetRound()
 animate()
