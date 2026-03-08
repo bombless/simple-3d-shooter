@@ -226,7 +226,15 @@ function hasNextLevel() {
   return state.currentLevelIndex < LEVELS.length - 1
 }
 
+function resetDayNightToNight() {
+  const nowMs = performance.now()
+  dayNightState.startedAtMs = nowMs
+  dayNightState.dayFactor = 0
+  flashlightState.lastUpdateMs = nowMs
+}
+
 function setLevel(index) {
+  const previousLevelIndex = state.currentLevelIndex
   state.currentLevelIndex = THREE.MathUtils.clamp(index, 0, LEVELS.length - 1)
   grassLevel.setActive(state.currentLevelIndex === 0)
   lavaLevel.setActive(state.currentLevelIndex === 1)
@@ -234,6 +242,10 @@ function setLevel(index) {
   lavaPeaceSystem.setActive(state.currentLevelIndex === 1)
   state.levelLabel = getActiveLevelMeta().label
   state.lavaDamageAccumulator = 0
+
+  if (previousLevelIndex !== 1 && state.currentLevelIndex === 1) {
+    resetDayNightToNight()
+  }
 }
 
 function orientPlayerViewForSpawn() {
