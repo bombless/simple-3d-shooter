@@ -78,7 +78,7 @@ const CELESTIAL_ORBIT_RADIUS = 58
 const CELESTIAL_ORBIT_TILT = 0.42
 const CELESTIAL_ORBIT_AXIS = new THREE.Vector3(0, 0, 1)
 const PLAYER_MAX_HP = 100
-const DAMAGE_FLASH_DECAY = 1.85
+const DAMAGE_FLASH_DECAY = 1.12
 const tempSunOrbitPos = new THREE.Vector3()
 const tempMoonOrbitPos = new THREE.Vector3()
 
@@ -303,12 +303,13 @@ function updateDamageOverlay(delta) {
   }
 
   const lowHpFactor = 1 - THREE.MathUtils.clamp(state.hp / PLAYER_MAX_HP, 0, 1)
-  const baseLowHpGlow = Math.max(0, (lowHpFactor - 0.35) / 0.65) * 0.28
+  const baseLowHpGlow = Math.max(0, (lowHpFactor - 0.2) / 0.8) * 0.52
   const heartbeatPulse =
     state.running && !state.ended
-      ? ((Math.sin(performance.now() * 0.012) + 1) * 0.5) * lowHpFactor * 0.09
+      ? ((Math.sin(performance.now() * 0.016) + 1) * 0.5) * lowHpFactor * 0.16
       : 0
-  const finalOpacity = THREE.MathUtils.clamp(baseLowHpGlow + heartbeatPulse + state.damageFlash * 0.66, 0, 0.82)
+  const hitFlash = Math.pow(Math.min(1, state.damageFlash), 0.8) * 1.05
+  const finalOpacity = THREE.MathUtils.clamp(baseLowHpGlow + heartbeatPulse + hitFlash, 0, 0.97)
   damageOverlayEl.style.opacity = finalOpacity.toFixed(3)
 }
 
@@ -319,12 +320,12 @@ function applyPlayerDamage(amount) {
   }
 
   state.hp = Math.max(0, state.hp - damageAmount)
-  const damageSeverity = THREE.MathUtils.clamp(damageAmount / 24, 0.2, 1)
+  const damageSeverity = THREE.MathUtils.clamp(damageAmount / 18, 0.45, 1.2)
   const lowHpFactor = 1 - THREE.MathUtils.clamp(state.hp / PLAYER_MAX_HP, 0, 1)
-  state.damageFlash = Math.min(1, state.damageFlash + damageSeverity * 0.48 + lowHpFactor * 0.4)
+  state.damageFlash = Math.min(1.4, state.damageFlash + damageSeverity * 0.95 + lowHpFactor * 0.55)
 
   playHurtSfx()
-  addCameraShake(0.28 + lowHpFactor * 0.15)
+  addCameraShake(0.36 + lowHpFactor * 0.22)
   updateHud()
 
   if (state.hp <= 0) {

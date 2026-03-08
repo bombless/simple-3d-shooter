@@ -172,8 +172,9 @@ canvas {
   pointer-events: none;
   opacity: 0;
   background:
-    radial-gradient(circle at 50% 115%, rgba(0, 0, 0, 0) 24%, rgba(0, 0, 0, 0.22) 82%),
-    radial-gradient(circle at 50% 50%, rgba(120, 0, 0, 0) 20%, rgba(154, 0, 0, 0.38) 100%);
+    radial-gradient(circle at 50% 115%, rgba(0, 0, 0, 0) 16%, rgba(0, 0, 0, 0.42) 86%),
+    radial-gradient(circle at 50% 50%, rgba(210, 0, 0, 0) 18%, rgba(188, 0, 0, 0.74) 100%),
+    radial-gradient(circle at 50% 50%, rgba(255, 78, 78, 0.32) 0%, rgba(255, 78, 78, 0) 38%);
   transition: opacity 70ms linear;
 }
 
