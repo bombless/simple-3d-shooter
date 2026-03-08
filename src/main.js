@@ -29,6 +29,8 @@ app.innerHTML = `
     <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 四关生存挑战 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
+  <button id="mobile-fullscreen-btn" type="button" aria-label="切换全屏">全屏</button>
+  <div id="mobile-rotate-hint">建议横屏体验</div>
   <div id="damage-overlay"></div>
   <div id="hp-bar">
     <div id="hp-bar-label">HP 100 / 100</div>
@@ -45,11 +47,38 @@ app.innerHTML = `
 `
 
 const statsEl = document.querySelector('#stats')
+const tipsEl = document.querySelector('#tips')
 const messageEl = document.querySelector('#message')
 const startBtn = document.querySelector('#start-btn')
+const mobileFullscreenBtn = document.querySelector('#mobile-fullscreen-btn')
+const mobileRotateHintEl = document.querySelector('#mobile-rotate-hint')
 const hpBarLabelEl = document.querySelector('#hp-bar-label')
 const hpBarFillEl = document.querySelector('#hp-bar-fill')
 const damageOverlayEl = document.querySelector('#damage-overlay')
+
+const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 四关生存挑战 | Esc 暂停 | R 重开'
+const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 点击屏幕射击 | 双击前跳直到落地 | 建议横屏并开启全屏'
+const MOBILE_LOOK_SENSITIVITY = 0.0038
+const MOBILE_TAP_MOVE_THRESHOLD = 10
+const MOBILE_TAP_MAX_DURATION_MS = 260
+const MOBILE_DOUBLE_TAP_WINDOW_MS = 300
+const MOBILE_DOUBLE_TAP_RANGE_PX = 42
+const mobileControls = {
+  enabled:
+    window.matchMedia('(pointer: coarse)').matches ||
+    'ontouchstart' in window ||
+    navigator.maxTouchPoints > 0,
+  activeTouchId: null,
+  startX: 0,
+  startY: 0,
+  lastX: 0,
+  lastY: 0,
+  touchStartedAtMs: 0,
+  moved: false,
+  lastTapTimeMs: -Infinity,
+  lastTapX: 0,
+  lastTapY: 0,
+}
 
 const dayNightState = {
   startedAtMs: performance.now(),
@@ -218,6 +247,9 @@ const state = {
   lastTrailPosition: new THREE.Vector3(0, CONSTANTS.PLAYER_HEIGHT, 12),
   currentLevelIndex: 0,
   levelLabel: LEVELS[0].label,
+  mobileForwardUntilLand: false,
+  mobileForwardAirborneSeen: false,
+  mobileJumpQueued: false,
 }
 
 const enemies = []
@@ -327,6 +359,78 @@ function resetDayNightToNight() {
   dayNightState.startedAtMs = nowMs
   dayNightState.dayFactor = 0
   flashlightState.lastUpdateMs = nowMs
+}
+
+function syncControlTips() {
+  tipsEl.textContent = mobileControls.enabled ? MOBILE_TIPS_TEXT : DESKTOP_TIPS_TEXT
+}
+
+function setAimPointerFromClientPosition(clientX, clientY) {
+  pointer.x = (clientX / window.innerWidth) * 2 - 1
+  pointer.y = -((clientY / window.innerHeight) * 2 - 1)
+}
+
+function updateMobileViewportMode() {
+  app.classList.toggle('mobile-mode', mobileControls.enabled)
+  if (!mobileControls.enabled) {
+    app.classList.remove('mobile-portrait')
+    mobileRotateHintEl.classList.remove('visible')
+    return
+  }
+
+  const isPortrait = window.innerHeight > window.innerWidth
+  app.classList.toggle('mobile-portrait', isPortrait)
+  mobileRotateHintEl.classList.toggle('visible', isPortrait)
+}
+
+function canUseFullscreen() {
+  return typeof document.documentElement.requestFullscreen === 'function'
+}
+
+function updateFullscreenButtonState() {
+  if (!mobileControls.enabled) {
+    mobileFullscreenBtn.classList.remove('visible')
+    return
+  }
+
+  if (!canUseFullscreen()) {
+    mobileFullscreenBtn.classList.remove('visible')
+    return
+  }
+
+  mobileFullscreenBtn.classList.add('visible')
+  const fullscreenActive = document.fullscreenElement != null
+  mobileFullscreenBtn.textContent = fullscreenActive ? '退出全屏' : '全屏'
+}
+
+async function toggleFullscreen() {
+  if (!canUseFullscreen()) {
+    return
+  }
+
+  try {
+    if (!document.fullscreenElement) {
+      await app.requestFullscreen()
+    } else {
+      await document.exitFullscreen()
+    }
+  } catch (error) {
+    console.warn('切换全屏失败:', error)
+  } finally {
+    updateFullscreenButtonState()
+  }
+}
+
+function triggerMobileForwardJump() {
+  if (!state.running || state.ended) {
+    return
+  }
+
+  state.mobileForwardUntilLand = true
+  state.mobileForwardAirborneSeen = !state.onGround
+  if (state.onGround) {
+    state.mobileJumpQueued = true
+  }
 }
 
 function setLevel(index) {
@@ -831,6 +935,10 @@ function resetRound() {
   state.shadowSunDamageAccumulator = 0
   state.bleedTrailAccumulator = 0
   state.inShadow = false
+  state.mobileForwardUntilLand = false
+  state.mobileForwardAirborneSeen = false
+  state.mobileJumpQueued = false
+  mobileControls.lastTapTimeMs = -Infinity
   flashlightState.battery = 1
   flashlightState.flickerTimeLeft = 0
   flashlightState.flickerMultiplier = 1
@@ -874,7 +982,9 @@ function beginRound() {
       state.runStartedMs = performance.now()
     }
     messageEl.classList.remove('visible')
-    renderer.domElement.requestPointerLock()
+    if (!mobileControls.enabled) {
+      renderer.domElement.requestPointerLock()
+    }
   }
 }
 
@@ -899,6 +1009,10 @@ function endRound(victory, reason) {
     return
   }
 
+  state.mobileForwardUntilLand = false
+  state.mobileForwardAirborneSeen = false
+  state.mobileJumpQueued = false
+  mobileControls.lastTapTimeMs = -Infinity
   pauseRound()
   state.ended = true
   document.exitPointerLock()
@@ -939,13 +1053,18 @@ function endRound(victory, reason) {
   }
 }
 
-function handleShoot() {
+function handleShoot(clientX = null, clientY = null) {
   if (!state.running || state.fireCooldown > 0) {
     return
   }
 
   playShotSfx()
   state.fireCooldown = 0.14
+  if (typeof clientX === 'number' && typeof clientY === 'number') {
+    setAimPointerFromClientPosition(clientX, clientY)
+  } else {
+    pointer.set(0, 0)
+  }
   raycaster.setFromCamera(pointer, camera)
 
   const hitTargets = enemies.map((enemy) => enemy.hitbox)
@@ -977,11 +1096,20 @@ function handleShoot() {
 
 function processInput(delta) {
   const activeLevel = getActiveLevelSystem()
+  const movementInput = {
+    KeyW: keys.KeyW || state.mobileForwardUntilLand,
+    KeyA: keys.KeyA,
+    KeyS: keys.KeyS,
+    KeyD: keys.KeyD,
+    Space: keys.Space || state.mobileJumpQueued,
+  }
+
+  state.mobileJumpQueued = false
   processPlayerInput({
     THREE,
     delta,
     camera,
-    keys,
+    keys: movementInput,
     state,
     staticColliders: activeLevel.colliders,
     constants: {
@@ -1046,6 +1174,15 @@ function updateRoundState(delta) {
   }
 
   processInput(delta)
+  if (state.mobileForwardUntilLand) {
+    if (!state.mobileForwardAirborneSeen && !state.onGround) {
+      state.mobileForwardAirborneSeen = true
+    } else if (state.mobileForwardAirborneSeen && state.onGround) {
+      state.mobileForwardUntilLand = false
+      state.mobileForwardAirborneSeen = false
+    }
+  }
+
   const activePeaceSystem = getActivePeaceSystem()
   if (activePeaceSystem && activePeaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
     endRound(true, `你在${getActiveLevelMeta().name}抵达灯塔，成功和平撤离`)
@@ -1067,6 +1204,138 @@ function updateRoundState(delta) {
   updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
 }
 
+function findTouchById(touchList, identifier) {
+  for (let index = 0; index < touchList.length; index += 1) {
+    const touch = touchList[index]
+    if (touch.identifier === identifier) {
+      return touch
+    }
+  }
+  return null
+}
+
+function queueMobileTapAction(clientX, clientY) {
+  if (!state.running || state.ended) {
+    return
+  }
+
+  const nowMs = performance.now()
+  const elapsedMs = nowMs - mobileControls.lastTapTimeMs
+  const deltaX = clientX - mobileControls.lastTapX
+  const deltaY = clientY - mobileControls.lastTapY
+  const isDoubleTap =
+    elapsedMs <= MOBILE_DOUBLE_TAP_WINDOW_MS &&
+    deltaX * deltaX + deltaY * deltaY <= MOBILE_DOUBLE_TAP_RANGE_PX * MOBILE_DOUBLE_TAP_RANGE_PX
+
+  if (isDoubleTap) {
+    mobileControls.lastTapTimeMs = -Infinity
+    triggerMobileForwardJump()
+    return
+  }
+
+  mobileControls.lastTapTimeMs = nowMs
+  mobileControls.lastTapX = clientX
+  mobileControls.lastTapY = clientY
+  handleShoot(clientX, clientY)
+}
+
+function handleTouchStart(event) {
+  if (!mobileControls.enabled) {
+    return
+  }
+
+  ensureAudioReady()
+  if (mobileControls.activeTouchId !== null) {
+    return
+  }
+
+  const touch = event.changedTouches[0]
+  if (!touch) {
+    return
+  }
+
+  mobileControls.activeTouchId = touch.identifier
+  mobileControls.startX = touch.clientX
+  mobileControls.startY = touch.clientY
+  mobileControls.lastX = touch.clientX
+  mobileControls.lastY = touch.clientY
+  mobileControls.touchStartedAtMs = performance.now()
+  mobileControls.moved = false
+  event.preventDefault()
+}
+
+function handleTouchMove(event) {
+  if (!mobileControls.enabled || mobileControls.activeTouchId === null) {
+    return
+  }
+
+  const touch = findTouchById(event.touches, mobileControls.activeTouchId)
+  if (!touch) {
+    return
+  }
+
+  const moveX = touch.clientX - mobileControls.lastX
+  const moveY = touch.clientY - mobileControls.lastY
+  const fromStartX = touch.clientX - mobileControls.startX
+  const fromStartY = touch.clientY - mobileControls.startY
+  if (fromStartX * fromStartX + fromStartY * fromStartY > MOBILE_TAP_MOVE_THRESHOLD ** 2) {
+    mobileControls.moved = true
+  }
+
+  if (state.running) {
+    state.yaw -= moveX * MOBILE_LOOK_SENSITIVITY
+    state.pitch -= moveY * MOBILE_LOOK_SENSITIVITY
+    state.pitch = THREE.MathUtils.clamp(state.pitch, -1.35, 1.35)
+    camera.rotation.set(state.pitch, state.yaw, 0)
+  }
+
+  mobileControls.lastX = touch.clientX
+  mobileControls.lastY = touch.clientY
+  event.preventDefault()
+}
+
+function handleTouchEnd(event) {
+  if (!mobileControls.enabled || mobileControls.activeTouchId === null) {
+    return
+  }
+
+  const touch = findTouchById(event.changedTouches, mobileControls.activeTouchId)
+  if (!touch) {
+    return
+  }
+
+  const touchDuration = performance.now() - mobileControls.touchStartedAtMs
+  const movedX = touch.clientX - mobileControls.startX
+  const movedY = touch.clientY - mobileControls.startY
+  const movedDistanceSq = movedX * movedX + movedY * movedY
+  const isTap =
+    touchDuration <= MOBILE_TAP_MAX_DURATION_MS && movedDistanceSq <= MOBILE_TAP_MOVE_THRESHOLD ** 2
+
+  if (isTap) {
+    if (!state.running && !state.ended) {
+      beginRound()
+    } else {
+      queueMobileTapAction(touch.clientX, touch.clientY)
+    }
+  }
+
+  mobileControls.activeTouchId = null
+  event.preventDefault()
+}
+
+function handleTouchCancel(event) {
+  if (!mobileControls.enabled) {
+    return
+  }
+
+  const touch = findTouchById(event.changedTouches, mobileControls.activeTouchId)
+  if (!touch) {
+    return
+  }
+
+  mobileControls.activeTouchId = null
+}
+
 window.addEventListener('keydown', (event) => {
   if (event.code in keys) {
     keys[event.code] = true
@@ -1085,6 +1354,10 @@ window.addEventListener('keyup', (event) => {
 })
 
 window.addEventListener('mousemove', (event) => {
+  if (mobileControls.enabled) {
+    return
+  }
+
   if (document.pointerLockElement !== renderer.domElement || !state.running) {
     return
   }
@@ -1097,6 +1370,10 @@ window.addEventListener('mousemove', (event) => {
 })
 
 window.addEventListener('mousedown', (event) => {
+  if (mobileControls.enabled) {
+    return
+  }
+
   if (event.button !== 0) {
     return
   }
@@ -1109,11 +1386,26 @@ window.addEventListener('mousedown', (event) => {
   handleShoot()
 })
 
+renderer.domElement.addEventListener('touchstart', handleTouchStart, { passive: false })
+renderer.domElement.addEventListener('touchmove', handleTouchMove, { passive: false })
+renderer.domElement.addEventListener('touchend', handleTouchEnd, { passive: false })
+renderer.domElement.addEventListener('touchcancel', handleTouchCancel, { passive: false })
+
+mobileFullscreenBtn.addEventListener('click', () => {
+  ensureAudioReady()
+  toggleFullscreen()
+})
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight
   camera.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
+  updateMobileViewportMode()
+  updateFullscreenButtonState()
 })
+
+window.addEventListener('orientationchange', updateMobileViewportMode)
+document.addEventListener('fullscreenchange', updateFullscreenButtonState)
 
 window.addEventListener(
   'pointerdown',
@@ -1128,6 +1420,10 @@ window.addEventListener('keydown', () => {
 })
 
 document.addEventListener('pointerlockchange', () => {
+  if (mobileControls.enabled) {
+    return
+  }
+
   if (state.ended) {
     return
   }
@@ -1165,6 +1461,9 @@ function animate() {
   requestAnimationFrame(animate)
 }
 
+syncControlTips()
+updateMobileViewportMode()
+updateFullscreenButtonState()
 setLevel(0)
 updateDayNightCycle()
 resetRound()
