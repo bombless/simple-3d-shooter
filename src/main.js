@@ -20,6 +20,13 @@ app.innerHTML = `
     </div>
   </div>
   <div id="crosshair"></div>
+  <div id="damage-overlay"></div>
+  <div id="hp-bar">
+    <div id="hp-bar-label">HP 100 / 100</div>
+    <div id="hp-bar-track">
+      <div id="hp-bar-fill"></div>
+    </div>
+  </div>
   <div id="message" class="visible">
     <h1>Cube Strike</h1>
     <p>单机 3D 生存射击</p>
@@ -36,6 +43,9 @@ const fxIncBtn = document.querySelector('#fx-inc')
 const fxLabelEl = document.querySelector('#fx-label')
 const fxMeterFillEl = document.querySelector('#fx-meter-fill')
 const fxMeterValueEl = document.querySelector('#fx-meter-value')
+const hpBarLabelEl = document.querySelector('#hp-bar-label')
+const hpBarFillEl = document.querySelector('#hp-bar-fill')
+const damageOverlayEl = document.querySelector('#damage-overlay')
 
 const DAY_NIGHT_CYCLE_SECONDS = 50
 const FLASHLIGHT_DRAIN_RATE = 0.028
@@ -67,6 +77,8 @@ const flashlightState = {
 const CELESTIAL_ORBIT_RADIUS = 58
 const CELESTIAL_ORBIT_TILT = 0.42
 const CELESTIAL_ORBIT_AXIS = new THREE.Vector3(0, 0, 1)
+const PLAYER_MAX_HP = 100
+const DAMAGE_FLASH_DECAY = 1.85
 const tempSunOrbitPos = new THREE.Vector3()
 const tempMoonOrbitPos = new THREE.Vector3()
 
@@ -208,7 +220,7 @@ const BLOOD_PARTICLE_GEOMETRY = new THREE.SphereGeometry(0.09, 6, 6)
 const state = {
   running: false,
   ended: false,
-  hp: 100,
+  hp: PLAYER_MAX_HP,
   score: 0,
   enemyGoal: 20,
   roundTime: 90,
@@ -221,6 +233,7 @@ const state = {
   verticalVelocity: 0,
   onGround: true,
   shakeAmount: 0,
+  damageFlash: 0,
   yaw: 0,
   pitch: 0,
 }
@@ -272,6 +285,51 @@ function adjustFlashlightEffectIntensity(delta) {
 
   flashlightState.effectIntensity = nextValue
   updateEffectUi()
+}
+
+function updateHpUi() {
+  const hpRatio = THREE.MathUtils.clamp(state.hp / PLAYER_MAX_HP, 0, 1)
+  const hue = THREE.MathUtils.lerp(0, 118, hpRatio)
+  const barColor = `hsl(${hue.toFixed(0)} 88% 50%)`
+
+  hpBarLabelEl.textContent = `HP ${Math.max(0, Math.ceil(state.hp))} / ${PLAYER_MAX_HP}`
+  hpBarFillEl.style.width = `${(hpRatio * 100).toFixed(1)}%`
+  hpBarFillEl.style.background = `linear-gradient(90deg, ${barColor}, rgba(255,255,255,0.86))`
+}
+
+function updateDamageOverlay(delta) {
+  if (state.damageFlash > 0) {
+    state.damageFlash = Math.max(0, state.damageFlash - DAMAGE_FLASH_DECAY * delta)
+  }
+
+  const lowHpFactor = 1 - THREE.MathUtils.clamp(state.hp / PLAYER_MAX_HP, 0, 1)
+  const baseLowHpGlow = Math.max(0, (lowHpFactor - 0.35) / 0.65) * 0.28
+  const heartbeatPulse =
+    state.running && !state.ended
+      ? ((Math.sin(performance.now() * 0.012) + 1) * 0.5) * lowHpFactor * 0.09
+      : 0
+  const finalOpacity = THREE.MathUtils.clamp(baseLowHpGlow + heartbeatPulse + state.damageFlash * 0.66, 0, 0.82)
+  damageOverlayEl.style.opacity = finalOpacity.toFixed(3)
+}
+
+function applyPlayerDamage(amount) {
+  const damageAmount = Math.max(0, amount)
+  if (damageAmount <= 0 || state.ended) {
+    return
+  }
+
+  state.hp = Math.max(0, state.hp - damageAmount)
+  const damageSeverity = THREE.MathUtils.clamp(damageAmount / 24, 0.2, 1)
+  const lowHpFactor = 1 - THREE.MathUtils.clamp(state.hp / PLAYER_MAX_HP, 0, 1)
+  state.damageFlash = Math.min(1, state.damageFlash + damageSeverity * 0.48 + lowHpFactor * 0.4)
+
+  playHurtSfx()
+  addCameraShake(0.28 + lowHpFactor * 0.15)
+  updateHud()
+
+  if (state.hp <= 0) {
+    endRound(false, '你的生命值归零了')
+  }
 }
 
 function createFlashlightCookieTexture() {
@@ -927,7 +985,7 @@ function resetRound() {
   clearBloodBursts()
   state.running = false
   state.ended = false
-  state.hp = 100
+  state.hp = PLAYER_MAX_HP
   state.score = 0
   state.timeLeft = state.roundTime
   state.runStartedMs = 0
@@ -937,6 +995,7 @@ function resetRound() {
   state.verticalVelocity = 0
   state.onGround = true
   state.shakeAmount = 0
+  state.damageFlash = 0
   state.yaw = 0
   state.pitch = 0
   flashlightState.battery = 1
@@ -1013,6 +1072,7 @@ function updateHud() {
   const phaseLabel = dayNightState.dayFactor < 0.35 ? 'NIGHT' : dayNightState.dayFactor < 0.65 ? 'DUSK' : 'DAY'
   const torchLabel = `${Math.round(flashlightState.battery * 100)}%`
   statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel} | TORCH: ${torchLabel}`
+  updateHpUi()
 }
 
 function handleShoot() {
@@ -1177,12 +1237,9 @@ function updateEnemies(delta) {
 
     enemy.damageCooldown -= delta
     if (distance < 1.9 && enemy.damageCooldown <= 0) {
-      state.hp -= 9
       enemy.damageCooldown = 0.9
-      playHurtSfx()
-      addCameraShake(0.28)
-      if (state.hp <= 0) {
-        endRound(false, '你的生命值归零了')
+      applyPlayerDamage(9)
+      if (state.ended) {
         return
       }
     }
@@ -1299,6 +1356,7 @@ function animate() {
   updateDayNightCycle()
   updateRoundState(delta)
   updateBloodBursts(delta)
+  updateDamageOverlay(delta)
   applyCameraShake(delta)
   renderer.render(scene, camera)
   requestAnimationFrame(animate)
