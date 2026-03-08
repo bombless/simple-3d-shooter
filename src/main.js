@@ -136,6 +136,7 @@ const bloodBursts = []
 const audioState = {
   context: null,
   master: null,
+  lastVictoryAt: 0,
 }
 const tempEnemyEyePosition = new THREE.Vector3()
 const tempEnemyEyeForward = new THREE.Vector3()
@@ -183,12 +184,13 @@ function playTone({
   volume = 0.2,
   attack = 0.002,
   release = 0.06,
+  startAt = null,
 }) {
   if (!ensureAudioReady()) {
     return
   }
 
-  const now = audioState.context.currentTime
+  const now = startAt ?? audioState.context.currentTime
   const oscillator = audioState.context.createOscillator()
   const gain = audioState.context.createGain()
 
@@ -237,6 +239,63 @@ function playHurtSfx() {
     volume: 0.12,
     release: 0.08,
   })
+}
+
+function playVictorySfx() {
+  const nowMs = performance.now()
+  if (nowMs - audioState.lastVictoryAt < 1500) {
+    return
+  }
+  audioState.lastVictoryAt = nowMs
+
+  if (!ensureAudioReady()) {
+    return
+  }
+
+  const startAt = audioState.context.currentTime + 0.03
+  const melody = [
+    { frequency: 523.25, duration: 0.12 },
+    { frequency: 659.25, duration: 0.12 },
+    { frequency: 783.99, duration: 0.14 },
+    { frequency: 1046.5, duration: 0.18 },
+    { frequency: 783.99, duration: 0.12 },
+    { frequency: 1046.5, duration: 0.2 },
+    { frequency: 1318.51, duration: 0.3 },
+  ]
+  const bass = [
+    { frequency: 130.81, duration: 0.16, offset: 0 },
+    { frequency: 164.81, duration: 0.16, offset: 0.24 },
+    { frequency: 196.0, duration: 0.2, offset: 0.49 },
+    { frequency: 261.63, duration: 0.28, offset: 0.82 },
+  ]
+
+  let cursor = 0
+  for (const note of melody) {
+    playTone({
+      frequency: note.frequency,
+      endFrequency: note.frequency * 1.015,
+      duration: note.duration,
+      type: 'triangle',
+      volume: 0.12,
+      attack: 0.004,
+      release: 0.08,
+      startAt: startAt + cursor,
+    })
+    cursor += note.duration * 0.88
+  }
+
+  for (const note of bass) {
+    playTone({
+      frequency: note.frequency,
+      endFrequency: note.frequency * 0.985,
+      duration: note.duration,
+      type: 'sine',
+      volume: 0.09,
+      attack: 0.008,
+      release: 0.09,
+      startAt: startAt + note.offset,
+    })
+  }
 }
 
 function addCameraShake(amount) {
@@ -608,9 +667,17 @@ function beginRound() {
 }
 
 function endRound(victory, reason) {
+  if (state.ended) {
+    return
+  }
+
   pauseRound()
   state.ended = true
   document.exitPointerLock()
+
+  if (victory) {
+    playVictorySfx()
+  }
 
   messageEl.classList.add('visible')
   messageEl.innerHTML = `
