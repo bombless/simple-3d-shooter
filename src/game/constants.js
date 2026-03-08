@@ -58,5 +58,9 @@ export const ENEMY_BASE_HEIGHT = 0.88
 export const BLOOD_GRAVITY = 22
 export const BLOOD_LIFETIME = 0.55
 
+// Lava level
+export const LAVA_DAMAGE_PER_TICK = 8
+export const LAVA_DAMAGE_INTERVAL_SECONDS = 0.34
+
 // Collision
 export const COLLISION_EPSILON = 0.001

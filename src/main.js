@@ -2,19 +2,19 @@ import './style.css'
 import * as THREE from 'three'
 import { createAudioController } from './game/audio'
 import { createDayNightController } from './game/dayNight'
-import { createPeaceSystem } from './game/peace'
-import { addStaticBoxCollider, processPlayerInput } from './game/playerMovement'
+import { createLavaLevel } from './game/lavaLevel'
+import { processPlayerInput } from './game/playerMovement'
 import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
 import { spawnBloodBurst, clearBloodBursts, updateBloodBursts } from './game/blood'
-import { updateHpUi, updateDamageOverlay, updateHud } from './game/ui'
-import { normalizeAngle, createFlashlightCookieTexture, addCameraShake, applyCameraShake } from './game/utils'
+import { updateDamageOverlay, updateHud } from './game/ui'
+import { createFlashlightCookieTexture, addCameraShake, applyCameraShake } from './game/utils'
 import * as CONSTANTS from './game/constants'
 
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 角落灯塔可和平胜利 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 小心岩浆 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <div id="damage-overlay"></div>
@@ -26,8 +26,8 @@ app.innerHTML = `
   </div>
   <div id="message" class="visible">
     <h1>Cube Strike</h1>
-    <p>单机 3D 生存射击</p>
-    <p class="sub">点击屏幕开始，存活 90 秒、击败 20 个敌人，或前往角落灯塔和平撤离即可胜利。</p>
+    <p>熔岩平台生存战</p>
+    <p class="sub">点击屏幕开始，在移动平台上击败 20 个敌人或存活 90 秒。掉进岩浆会持续掉血。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -121,50 +121,9 @@ const world = new THREE.Group()
 scene.add(world)
 const staticColliders = []
 
-const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(120, 120, 20, 20),
-  new THREE.MeshStandardMaterial({ color: 0x2f8f4a, roughness: 1 })
-)
-floor.rotation.x = -Math.PI / 2
-floor.receiveShadow = true
-world.add(floor)
-
-const obstacleMaterial = new THREE.MeshStandardMaterial({ color: 0x7b6652, roughness: 0.9 })
-for (let i = 0; i < 22; i += 1) {
-  const width = THREE.MathUtils.randFloat(1.5, 3.5)
-  const height = THREE.MathUtils.randFloat(1, 4)
-  const depth = THREE.MathUtils.randFloat(1.5, 3.5)
-  const block = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), obstacleMaterial)
-  let x = 0
-  let z = 0
-  let attempts = 0
-  do {
-    x = THREE.MathUtils.randFloatSpread(58)
-    z = THREE.MathUtils.randFloatSpread(58)
-    attempts += 1
-  } while (
-    attempts < 40 &&
-    (x - CONSTANTS.PEACE_EXIT_POSITION.x) ** 2 + (z - CONSTANTS.PEACE_EXIT_POSITION.z) ** 2 < 46
-  )
-  block.position.set(x, height / 2, z)
-  block.castShadow = true
-  block.receiveShadow = true
-  world.add(block)
-  addStaticBoxCollider(staticColliders, block.position, width, height, depth)
-}
-
-const boundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
-const peaceSystem = createPeaceSystem({
+const lavaLevel = createLavaLevel({
   THREE,
-  scene,
   world,
-  boundaryMaterial,
-  config: {
-    exitPosition: CONSTANTS.PEACE_EXIT_POSITION,
-    triggerRadius: CONSTANTS.PEACE_EXIT_TRIGGER_RADIUS,
-    searchlightSweepSpeed: CONSTANTS.PEACE_SEARCHLIGHT_SWEEP_SPEED,
-  },
-  dayNightState,
 })
 
 const pointer = new THREE.Vector2(0, 0)
@@ -198,17 +157,15 @@ const state = {
   damageFlash: 0,
   yaw: 0,
   pitch: 0,
+  lavaDamageAccumulator: 0,
+  levelLabel: 'LAVA',
 }
 
 const enemies = []
 const bloodBursts = []
 
-function orientPlayerViewToLighthouse() {
-  const lookTarget = new THREE.Vector3(
-    CONSTANTS.PEACE_EXIT_POSITION.x,
-    CONSTANTS.PEACE_EXIT_LOOK_TARGET_HEIGHT,
-    CONSTANTS.PEACE_EXIT_POSITION.z
-  )
+function orientPlayerViewForSpawn() {
+  const lookTarget = new THREE.Vector3(0, 1.8, 0)
   camera.position.copy(state.playerPosition)
   camera.lookAt(lookTarget)
   state.yaw = camera.rotation.y
@@ -236,10 +193,19 @@ function applyPlayerDamage(amount) {
   }
 }
 
-function randomSpawn() {
-  const angle = Math.random() * Math.PI * 2
-  const radius = THREE.MathUtils.randFloat(19, 30)
-  return new THREE.Vector3(Math.cos(angle) * radius, CONSTANTS.ENEMY_BASE_HEIGHT, Math.sin(angle) * radius)
+function spawnEnemyOnPlatform() {
+  const spawnData = lavaLevel.getEnemySpawnPoint(CONSTANTS.ENEMY_BASE_HEIGHT)
+  const enemy = spawnEnemy(world, enemies, {
+    spawnPosition: spawnData.position,
+  })
+  enemy.platformIndex = spawnData.platformIndex
+  lavaLevel.constrainEnemyToPlatform(enemy, CONSTANTS.ENEMY_BASE_HEIGHT)
+}
+
+function keepEnemiesOnPlatforms() {
+  for (const enemy of enemies) {
+    lavaLevel.constrainEnemyToPlatform(enemy, CONSTANTS.ENEMY_BASE_HEIGHT)
+  }
 }
 
 const audioController = createAudioController({
@@ -304,8 +270,6 @@ const { updateDayNightCycle } = createDayNightController({
   updateNightAmbience,
 })
 
-const { updatePeaceLighthouse, checkPeacefulWinCondition } = peaceSystem
-
 function resetRound() {
   clearEnemies(world, enemies)
   clearBloodBursts(world, bloodBursts)
@@ -324,15 +288,18 @@ function resetRound() {
   state.damageFlash = 0
   state.yaw = 0
   state.pitch = 0
+  state.lavaDamageAccumulator = 0
   flashlightState.battery = 1
   flashlightState.flickerTimeLeft = 0
   flashlightState.flickerMultiplier = 1
   flashlightState.lastUpdateMs = performance.now()
-  state.playerPosition.set(0, CONSTANTS.PLAYER_HEIGHT, 12)
-  orientPlayerViewToLighthouse()
+
+  lavaLevel.update()
+  state.playerPosition.copy(lavaLevel.getPlayerSpawnPoint(CONSTANTS.PLAYER_HEIGHT))
+  orientPlayerViewForSpawn()
 
   for (let i = 0; i < 6; i += 1) {
-    spawnEnemy(world, enemies)
+    spawnEnemyOnPlatform()
   }
 
   updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
@@ -426,18 +393,19 @@ function handleShoot() {
   state.score += 1
   updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
   if (state.score >= state.enemyGoal) {
-    endRound(true, `你击败了 ${state.enemyGoal} 个敌人`) // Score win
+    endRound(true, `你击败了 ${state.enemyGoal} 个敌人`)
   }
 }
 
 function processInput(delta) {
+  const activeColliders = staticColliders.concat(lavaLevel.platformColliders)
   processPlayerInput({
     THREE,
     delta,
     camera,
     keys,
     state,
-    staticColliders,
+    staticColliders: activeColliders,
     constants: {
       moveSpeed: CONSTANTS.PLAYER_MOVE_SPEED,
       playerHeight: CONSTANTS.PLAYER_HEIGHT,
@@ -452,7 +420,25 @@ function processInput(delta) {
   })
 }
 
+function updateLavaDamage(delta) {
+  if (lavaLevel.isPlayerTouchingLava(state.playerPosition, CONSTANTS.PLAYER_HEIGHT)) {
+    state.lavaDamageAccumulator += delta
+    while (state.lavaDamageAccumulator >= CONSTANTS.LAVA_DAMAGE_INTERVAL_SECONDS) {
+      state.lavaDamageAccumulator -= CONSTANTS.LAVA_DAMAGE_INTERVAL_SECONDS
+      applyPlayerDamage(CONSTANTS.LAVA_DAMAGE_PER_TICK)
+      if (state.ended) {
+        return
+      }
+    }
+    return
+  }
+
+  state.lavaDamageAccumulator = 0
+}
+
 function updateRoundState(delta) {
+  lavaLevel.update()
+
   if (!state.running || state.ended) {
     return
   }
@@ -469,15 +455,26 @@ function updateRoundState(delta) {
   state.spawnAccumulator += delta
   if (state.spawnAccumulator >= 1.4 && enemies.length < 14) {
     state.spawnAccumulator = 0
-    spawnEnemy(world, enemies)
+    spawnEnemyOnPlatform()
+  }
+
+  lavaLevel.applyPlatformCarryToPlayer(state, CONSTANTS.PLAYER_HEIGHT)
+  for (const enemy of enemies) {
+    lavaLevel.applyPlatformCarryToEnemy(enemy)
   }
 
   processInput(delta)
-  if (checkPeacefulWinCondition(state.playerPosition)) {
-    endRound(true, '你抵达了角落灯塔，成功和平撤离')
+  updateLavaDamage(delta)
+  if (state.ended) {
     return
   }
+
   updateEnemies(enemies, state, camera, delta, applyPlayerDamage)
+  if (state.ended) {
+    return
+  }
+
+  keepEnemiesOnPlatforms()
   updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
 }
 
@@ -529,9 +526,13 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
 })
 
-window.addEventListener('pointerdown', () => {
-  ensureAudioReady()
-}, { passive: true })
+window.addEventListener(
+  'pointerdown',
+  () => {
+    ensureAudioReady()
+  },
+  { passive: true }
+)
 
 window.addEventListener('keydown', () => {
   ensureAudioReady()
@@ -560,7 +561,6 @@ startBtn.addEventListener('click', beginRound)
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateDayNightCycle()
-  updatePeaceLighthouse()
   updateRoundState(delta)
   updateBloodBursts(world, bloodBursts, delta)
   updateDamageOverlay(state, delta, damageOverlayEl)

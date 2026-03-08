@@ -33,6 +33,7 @@ export function updateDamageOverlay(state, delta, damageOverlayEl) {
 export function updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl) {
   const phaseLabel = dayNightState.dayFactor < 0.35 ? 'NIGHT' : dayNightState.dayFactor < 0.65 ? 'DUSK' : 'DAY'
   const torchLabel = `${Math.round(flashlightState.battery * 100)}%`
-  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel} | TORCH: ${torchLabel}`
+  const levelLabel = state.levelLabel ? ` | LEVEL: ${state.levelLabel}` : ''
+  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel} | TORCH: ${torchLabel}${levelLabel}`
   updateHpUi(state, hpBarLabelEl, hpBarFillEl)
 }

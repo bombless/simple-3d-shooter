@@ -2,9 +2,10 @@ import * as THREE from 'three'
 import { ENEMY_BASE_HEIGHT } from './constants'
 import { normalizeAngle, randomSpawn } from './utils'
 
-export function spawnEnemy(world, enemies) {
+export function spawnEnemy(world, enemies, options = {}) {
+  const { spawnPosition } = options
   const mesh = new THREE.Group()
-  mesh.position.copy(randomSpawn(ENEMY_BASE_HEIGHT))
+  mesh.position.copy(spawnPosition || randomSpawn(ENEMY_BASE_HEIGHT))
   const coreRadius = THREE.MathUtils.randFloat(0.75, 0.95)
 
   const coreMaterial = new THREE.MeshStandardMaterial({
@@ -182,6 +183,7 @@ export function spawnEnemy(world, enemies) {
 
   enemies.push(enemy)
   world.add(mesh)
+  return enemy
 }
 
 export function removeEnemy(world, enemy) {
