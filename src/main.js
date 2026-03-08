@@ -2,6 +2,7 @@ import './style.css'
 import * as THREE from 'three'
 import { createAudioController } from './game/audio'
 import { createDayNightController } from './game/dayNight'
+import { createPeaceSystem } from './game/peace'
 import { createGrassLevel } from './game/grassLevel'
 import { createLavaLevel } from './game/lavaLevel'
 import { processPlayerInput } from './game/playerMovement'
@@ -20,7 +21,7 @@ const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 第一关胜利可进第二关 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 角落灯塔可和平胜利并进入下一关 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <div id="damage-overlay"></div>
@@ -33,7 +34,7 @@ app.innerHTML = `
   <div id="message" class="visible">
     <h1>Cube Strike</h1>
     <p>双关卡生存射击</p>
-    <p class="sub">第一关：荒野防线。胜利后可进入第二关熔岩平台，岩浆会照亮附近并造成持续伤害。</p>
+    <p class="sub">第一关：荒野防线。可击败敌人或前往角落灯塔和平撤离来胜利，然后进入第二关熔岩平台。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -126,8 +127,26 @@ scene.add(moonOrb)
 const world = new THREE.Group()
 scene.add(world)
 
-const grassLevel = createGrassLevel({ THREE, world })
+const grassLevel = createGrassLevel({
+  THREE,
+  world,
+  config: {
+    peaceExitPosition: CONSTANTS.PEACE_EXIT_POSITION,
+  },
+})
 const lavaLevel = createLavaLevel({ THREE, world })
+const peaceSystem = createPeaceSystem({
+  THREE,
+  scene,
+  world,
+  boundaryMaterial: new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 }),
+  config: {
+    exitPosition: CONSTANTS.PEACE_EXIT_POSITION,
+    triggerRadius: CONSTANTS.PEACE_EXIT_TRIGGER_RADIUS,
+    searchlightSweepSpeed: CONSTANTS.PEACE_SEARCHLIGHT_SWEEP_SPEED,
+  },
+  dayNightState,
+})
 
 const pointer = new THREE.Vector2(0, 0)
 const raycaster = new THREE.Raycaster()
@@ -184,13 +203,20 @@ function setLevel(index) {
   state.currentLevelIndex = THREE.MathUtils.clamp(index, 0, LEVELS.length - 1)
   grassLevel.setActive(state.currentLevelIndex === 0)
   lavaLevel.setActive(state.currentLevelIndex === 1)
+  peaceSystem.setActive(state.currentLevelIndex === 0)
   state.levelLabel = getActiveLevelMeta().label
   state.lavaDamageAccumulator = 0
 }
 
 function orientPlayerViewForSpawn() {
-  const activeLevel = getActiveLevelSystem()
-  const lookTarget = activeLevel.getPlayerLookTarget()
+  let lookTarget = getActiveLevelSystem().getPlayerLookTarget()
+  if (state.currentLevelIndex === 0) {
+    lookTarget = new THREE.Vector3(
+      CONSTANTS.PEACE_EXIT_POSITION.x,
+      CONSTANTS.PEACE_EXIT_LOOK_TARGET_HEIGHT,
+      CONSTANTS.PEACE_EXIT_POSITION.z
+    )
+  }
   camera.position.copy(state.playerPosition)
   camera.lookAt(lookTarget)
   state.yaw = camera.rotation.y
@@ -539,6 +565,11 @@ function updateRoundState(delta) {
   }
 
   processInput(delta)
+  if (state.currentLevelIndex === 0 && peaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
+    endRound(true, '你抵达了角落灯塔，成功和平撤离')
+    return
+  }
+
   updateLavaDamage(delta)
   if (state.ended) {
     return
@@ -636,6 +667,7 @@ startBtn.addEventListener('click', beginRound)
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateDayNightCycle()
+  peaceSystem.updatePeaceLighthouse()
   updateRoundState(delta)
   updateBloodBursts(world, bloodBursts, delta)
   updateDamageOverlay(state, delta, damageOverlayEl)

@@ -70,6 +70,12 @@ export function createPeaceSystem({
   config,
   dayNightState,
 }) {
+  const worldRoot = new THREE.Group()
+  world.add(worldRoot)
+  const sceneRoot = new THREE.Group()
+  scene.add(sceneRoot)
+  let active = true
+
   const { exitPosition, triggerRadius, searchlightSweepSpeed } = config
 
   const boundarySegments = [
@@ -87,12 +93,12 @@ export function createPeaceSystem({
     wall.position.copy(segment.position)
     wall.castShadow = true
     wall.receiveShadow = true
-    world.add(wall)
+    worldRoot.add(wall)
   }
 
   const lighthouse = new THREE.Group()
   lighthouse.position.set(exitPosition.x, 0, exitPosition.z)
-  world.add(lighthouse)
+  worldRoot.add(lighthouse)
 
   const lighthouseBody = new THREE.Mesh(
     new THREE.CylinderGeometry(1.12, 1.3, 5.2, 18),
@@ -162,7 +168,7 @@ export function createPeaceSystem({
 
   const spotlightTarget = new THREE.Object3D()
   spotlightTarget.position.set(exitPosition.x - 7.8, 0.15, exitPosition.z - 2.4)
-  scene.add(spotlightTarget)
+  sceneRoot.add(spotlightTarget)
   spotlight.target = spotlightTarget
 
   const beamTexture = createSearchlightBeamTexture(THREE)
@@ -179,7 +185,7 @@ export function createPeaceSystem({
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 1.6, 1, 26, 1, true), beamMaterial)
   beam.castShadow = false
   beam.receiveShadow = false
-  scene.add(beam)
+  sceneRoot.add(beam)
 
   const beamGroundMaterial = new THREE.MeshBasicMaterial({
     color: 0xdff4ff,
@@ -195,7 +201,7 @@ export function createPeaceSystem({
   beamGround.position.set(exitPosition.x, 0.08, exitPosition.z)
   beamGround.castShadow = false
   beamGround.receiveShadow = false
-  world.add(beamGround)
+  worldRoot.add(beamGround)
 
   const beamTip = new THREE.Vector3()
   const beamTarget = new THREE.Vector3()
@@ -211,9 +217,13 @@ export function createPeaceSystem({
   const zoneRing = new THREE.Mesh(new THREE.RingGeometry(1.38, 2.55, 48), zoneMaterial)
   zoneRing.position.set(exitPosition.x, 0.05, exitPosition.z)
   zoneRing.rotation.x = -Math.PI / 2
-  world.add(zoneRing)
+  worldRoot.add(zoneRing)
 
   function updatePeaceLighthouse() {
+    if (!active) {
+      return
+    }
+
     const nowSeconds = performance.now() * 0.001
     const nightFactor = 1 - dayNightState.dayFactor
     const sweepAngle = nowSeconds * searchlightSweepSpeed
@@ -276,13 +286,24 @@ export function createPeaceSystem({
   }
 
   function checkPeacefulWinCondition(playerPosition) {
+    if (!active) {
+      return false
+    }
+
     const dx = playerPosition.x - exitPosition.x
     const dz = playerPosition.z - exitPosition.z
     return dx * dx + dz * dz <= triggerRadius * triggerRadius
   }
 
+  function setActive(nextActive) {
+    active = Boolean(nextActive)
+    worldRoot.visible = active
+    sceneRoot.visible = active
+  }
+
   return {
     updatePeaceLighthouse,
     checkPeacefulWinCondition,
+    setActive,
   }
 }

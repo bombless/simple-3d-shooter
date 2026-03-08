@@ -9,7 +9,8 @@ function addBoxCollider(colliders, center, width, height, depth) {
   })
 }
 
-export function createGrassLevel({ THREE, world }) {
+export function createGrassLevel({ THREE, world, config = {} }) {
+  const { peaceExitPosition = null } = config
   const root = new THREE.Group()
   world.add(root)
 
@@ -39,7 +40,11 @@ export function createGrassLevel({ THREE, world }) {
       attempts += 1
     } while (
       attempts < 48 &&
-      ((x * x + z * z < 52) || ((x * x + (z - 12) * (z - 12)) < 40))
+      (
+        (x * x + z * z < 52) ||
+        ((x * x + (z - 12) * (z - 12)) < 40) ||
+        (peaceExitPosition && ((x - peaceExitPosition.x) ** 2 + (z - peaceExitPosition.z) ** 2 < 46))
+      )
     )
 
     block.position.set(x, height / 2, z)
