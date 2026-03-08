@@ -33,6 +33,9 @@ export const PEACE_SEARCHLIGHT_SWEEP_SPEED = 0.53
 export const LAVA_PEACE_EXIT_POSITION = new THREE.Vector3(21.2, 0, 0.8)
 export const LAVA_PEACE_EXIT_TRIGGER_RADIUS = 2.95
 export const LAVA_PEACE_ENEMY_SPAWN_SAFE_RADIUS = 10.8
+export const SHADOW_LEVEL_SUN_DIRECTION = new THREE.Vector3(-0.64, -1, -0.24).normalize()
+export const SHADOW_LEVEL_SUN_POSITION = new THREE.Vector3(58, 74, 24)
+export const BLEED_LEVEL_SUN_POSITION = new THREE.Vector3(42, 58, 20)
 
 // Player
 export const PLAYER_MAX_HP = 100
@@ -64,6 +67,19 @@ export const BLOOD_LIFETIME = 0.55
 // Lava level
 export const LAVA_DAMAGE_PER_TICK = 8
 export const LAVA_DAMAGE_INTERVAL_SECONDS = 0.34
+
+// Bleed level
+export const BLEED_PASSIVE_DAMAGE_PER_SECOND = 3.2
+export const BLEED_PASSIVE_DAMAGE_INTERVAL_SECONDS = 0.28
+export const BLEED_HEALTH_PACK_HEAL = 30
+export const BLEED_HEALTH_PACK_COUNT = 6
+export const BLEED_HEALTH_PACK_RESPAWN_SECONDS = 8
+export const BLEED_TRAIL_INTERVAL_SECONDS = 0.2
+export const BLEED_TRAIL_MAX_COUNT = 180
+
+// Shadow level
+export const SHADOW_SUN_DAMAGE_PER_SECOND = 6.4
+export const SHADOW_SUN_DAMAGE_INTERVAL_SECONDS = 0.24
 
 // Collision
 export const COLLISION_EPSILON = 0.001

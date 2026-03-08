@@ -5,6 +5,8 @@ import { createDayNightController } from './game/dayNight'
 import { createPeaceSystem } from './game/peace'
 import { createGrassLevel } from './game/grassLevel'
 import { createLavaLevel } from './game/lavaLevel'
+import { createBleedLevel } from './game/bleedLevel'
+import { createShadowPillarLevel } from './game/shadowPillarLevel'
 import { processPlayerInput } from './game/playerMovement'
 import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
 import { spawnBloodBurst, clearBloodBursts, updateBloodBursts } from './game/blood'
@@ -16,13 +18,15 @@ import * as CONSTANTS from './game/constants'
 const LEVELS = [
   { id: 'grass', label: 'FIELD', name: '第一关：荒野防线' },
   { id: 'lava', label: 'LAVA', name: '第二关：熔岩平台' },
+  { id: 'bleed', label: 'BLEED', name: '第三关：失血平原' },
+  { id: 'shadow', label: 'SHADOW', name: '第四关：烈日柱阵' },
 ]
 
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="hud">
     <div id="stats">HP: 100 | SCORE: 0 | ENEMIES: 0 | TIME: 90</div>
-    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 两关都可通过灯塔和平撤离胜利 | Esc 暂停 | R 重开</div>
+    <div id="tips">WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 四关生存挑战 | Esc 暂停 | R 重开</div>
   </div>
   <div id="crosshair"></div>
   <div id="damage-overlay"></div>
@@ -34,8 +38,8 @@ app.innerHTML = `
   </div>
   <div id="message" class="visible">
     <h1>Beaconfall</h1>
-    <p>双关卡生存射击</p>
-    <p class="sub">双关卡生存战：两关都支持战斗胜利与灯塔和平撤离。第一关完成后可进入第二关熔岩平台。</p>
+    <p>四关生存射击</p>
+    <p class="sub">四关挑战：荒野、熔岩、失血平原、烈日柱阵。每一关都有不同生存机制。</p>
     <button id="start-btn">开始游戏</button>
   </div>
 `
@@ -136,6 +140,8 @@ const grassLevel = createGrassLevel({
   },
 })
 const lavaLevel = createLavaLevel({ THREE, world })
+const bleedLevel = createBleedLevel({ THREE, world })
+const shadowLevel = createShadowPillarLevel({ THREE, world })
 const peaceBoundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x4c5d7a, roughness: 0.95 })
 const grassPeaceSystem = createPeaceSystem({
   THREE,
@@ -196,6 +202,11 @@ const state = {
   yaw: 0,
   pitch: 0,
   lavaDamageAccumulator: 0,
+  bleedDamageAccumulator: 0,
+  shadowSunDamageAccumulator: 0,
+  bleedTrailAccumulator: 0,
+  inShadow: false,
+  lastTrailPosition: new THREE.Vector3(0, CONSTANTS.PLAYER_HEIGHT, 12),
   currentLevelIndex: 0,
   levelLabel: LEVELS[0].label,
 }
@@ -203,27 +214,103 @@ const state = {
 const enemies = []
 const bloodBursts = []
 const hitRings = []
+const bleedTrails = []
+const healthPacks = []
+const pickupBubbles = []
+
+const BLEED_TRAIL_GEOMETRY = new THREE.CircleGeometry(0.3, 18)
+const HEALTH_PACK_CORE_GEOMETRY = new THREE.SphereGeometry(0.3, 14, 12)
+const HEALTH_PACK_BAR_GEOMETRY = new THREE.BoxGeometry(0.14, 0.62, 0.14)
+const PICKUP_BUBBLE_GEOMETRY = new THREE.SphereGeometry(0.04, 10, 10)
+const bleedTrailRoot = new THREE.Group()
+world.add(bleedTrailRoot)
+const healthPackRoot = new THREE.Group()
+world.add(healthPackRoot)
+const pickupBubbleRoot = new THREE.Group()
+camera.add(pickupBubbleRoot)
+
+const tempPackSpawnVector = new THREE.Vector3()
+const tempPackSpacingVector = new THREE.Vector3()
+const tempBubbleVelocity = new THREE.Vector3()
+
+for (let i = 0; i < CONSTANTS.BLEED_HEALTH_PACK_COUNT; i += 1) {
+  const mesh = new THREE.Group()
+  const core = new THREE.Mesh(
+    HEALTH_PACK_CORE_GEOMETRY,
+    new THREE.MeshStandardMaterial({
+      color: 0xff5f78,
+      emissive: 0xd63176,
+      emissiveIntensity: 1.15,
+      roughness: 0.38,
+      metalness: 0.02,
+    })
+  )
+  core.castShadow = true
+  core.receiveShadow = true
+  mesh.add(core)
+
+  const barVertical = new THREE.Mesh(
+    HEALTH_PACK_BAR_GEOMETRY,
+    new THREE.MeshStandardMaterial({
+      color: 0xffd4e0,
+      emissive: 0xff9cc1,
+      emissiveIntensity: 0.5,
+      roughness: 0.28,
+      metalness: 0.05,
+    })
+  )
+  barVertical.position.y = 0.42
+  barVertical.castShadow = true
+  mesh.add(barVertical)
+
+  const barHorizontal = barVertical.clone()
+  barHorizontal.rotation.z = Math.PI / 2
+  mesh.add(barHorizontal)
+
+  healthPackRoot.add(mesh)
+  healthPacks.push({
+    mesh,
+    active: false,
+    respawnTimer: 0,
+    pulsePhase: Math.random() * Math.PI * 2,
+  })
+}
 
 function getActiveLevelMeta() {
   return LEVELS[state.currentLevelIndex]
 }
 
 function getActiveLevelSystem() {
-  return state.currentLevelIndex === 0 ? grassLevel : lavaLevel
+  if (state.currentLevelIndex === 0) return grassLevel
+  if (state.currentLevelIndex === 1) return lavaLevel
+  if (state.currentLevelIndex === 2) return bleedLevel
+  return shadowLevel
 }
 
 function getActivePeaceSystem() {
-  return state.currentLevelIndex === 0 ? grassPeaceSystem : lavaPeaceSystem
+  if (state.currentLevelIndex === 0) return grassPeaceSystem
+  if (state.currentLevelIndex === 1) return lavaPeaceSystem
+  return null
 }
 
 function getActivePeaceExitPosition() {
-  return state.currentLevelIndex === 0
-    ? CONSTANTS.PEACE_EXIT_POSITION
-    : CONSTANTS.LAVA_PEACE_EXIT_POSITION
+  if (state.currentLevelIndex === 0) return CONSTANTS.PEACE_EXIT_POSITION
+  if (state.currentLevelIndex === 1) return CONSTANTS.LAVA_PEACE_EXIT_POSITION
+  return null
 }
 
 function hasNextLevel() {
   return state.currentLevelIndex < LEVELS.length - 1
+}
+
+function isFixedDayLevel() {
+  return state.currentLevelIndex >= 2
+}
+
+function getFixedSunPosition() {
+  return state.currentLevelIndex === 3
+    ? CONSTANTS.SHADOW_LEVEL_SUN_POSITION
+    : CONSTANTS.BLEED_LEVEL_SUN_POSITION
 }
 
 function resetDayNightToNight() {
@@ -238,23 +325,43 @@ function setLevel(index) {
   state.currentLevelIndex = THREE.MathUtils.clamp(index, 0, LEVELS.length - 1)
   grassLevel.setActive(state.currentLevelIndex === 0)
   lavaLevel.setActive(state.currentLevelIndex === 1)
+  bleedLevel.setActive(state.currentLevelIndex === 2)
+  shadowLevel.setActive(state.currentLevelIndex === 3)
   grassPeaceSystem.setActive(state.currentLevelIndex === 0)
   lavaPeaceSystem.setActive(state.currentLevelIndex === 1)
+  healthPackRoot.visible = state.currentLevelIndex === 2
+  bleedTrailRoot.visible = state.currentLevelIndex === 2
   state.levelLabel = getActiveLevelMeta().label
   state.lavaDamageAccumulator = 0
+  state.bleedDamageAccumulator = 0
+  state.shadowSunDamageAccumulator = 0
+  state.bleedTrailAccumulator = 0
+  state.inShadow = false
 
   if (previousLevelIndex !== 1 && state.currentLevelIndex === 1) {
     resetDayNightToNight()
   }
+
+  if (previousLevelIndex !== state.currentLevelIndex) {
+    resetBleedLevelObjects()
+  }
+
+  if (!isFixedDayLevel()) {
+    sunOrb.scale.setScalar(1)
+    moonOrb.scale.setScalar(1)
+  }
 }
 
 function orientPlayerViewForSpawn() {
+  let lookTarget = getActiveLevelSystem().getPlayerLookTarget()
   const peaceExitPosition = getActivePeaceExitPosition()
-  const lookTarget = new THREE.Vector3(
-    peaceExitPosition.x,
-    CONSTANTS.PEACE_EXIT_LOOK_TARGET_HEIGHT,
-    peaceExitPosition.z
-  )
+  if (peaceExitPosition) {
+    lookTarget = new THREE.Vector3(
+      peaceExitPosition.x,
+      CONSTANTS.PEACE_EXIT_LOOK_TARGET_HEIGHT,
+      peaceExitPosition.z
+    )
+  }
   camera.position.copy(state.playerPosition)
   camera.lookAt(lookTarget)
   state.yaw = camera.rotation.y
@@ -262,7 +369,8 @@ function orientPlayerViewForSpawn() {
   camera.rotation.set(state.pitch, state.yaw, 0)
 }
 
-function applyPlayerDamage(amount) {
+function applyPlayerDamage(amount, options = {}) {
+  const { silent = false, noShake = false } = options
   const damageAmount = Math.max(0, amount)
   if (damageAmount <= 0 || state.ended) {
     return
@@ -273,13 +381,315 @@ function applyPlayerDamage(amount) {
   const lowHpFactor = 1 - THREE.MathUtils.clamp(state.hp / CONSTANTS.PLAYER_MAX_HP, 0, 1)
   state.damageFlash = Math.min(1.4, state.damageFlash + damageSeverity * 0.95 + lowHpFactor * 0.55)
 
-  playHurtSfx()
-  addCameraShake(state, 0.36 + lowHpFactor * 0.22)
+  if (!silent) {
+    playHurtSfx()
+  }
+  if (!noShake) {
+    addCameraShake(state, 0.36 + lowHpFactor * 0.22)
+  }
   updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
 
   if (state.hp <= 0) {
     endRound(false, '你的生命值归零了')
   }
+}
+
+function clearBleedTrails() {
+  while (bleedTrails.length > 0) {
+    const trail = bleedTrails.pop()
+    bleedTrailRoot.remove(trail.mesh)
+    trail.mesh.geometry.dispose()
+    trail.material.dispose()
+  }
+}
+
+function clearPickupBubbles() {
+  while (pickupBubbles.length > 0) {
+    const bubble = pickupBubbles.pop()
+    pickupBubbleRoot.remove(bubble.mesh)
+    bubble.mesh.geometry.dispose()
+    bubble.material.dispose()
+  }
+}
+
+function createBloodTrailAt(position) {
+  const radius = THREE.MathUtils.randFloat(0.18, 0.34)
+  const geometry = BLEED_TRAIL_GEOMETRY.clone()
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x6a1010,
+    transparent: true,
+    opacity: THREE.MathUtils.randFloat(0.44, 0.68),
+    depthWrite: false,
+  })
+  material.fog = false
+  const trail = new THREE.Mesh(geometry, material)
+  trail.rotation.x = -Math.PI / 2
+  trail.rotation.z = Math.random() * Math.PI * 2
+  trail.scale.setScalar(radius / 0.3)
+  trail.position.set(position.x, 0.03, position.z)
+  bleedTrailRoot.add(trail)
+
+  bleedTrails.push({
+    mesh: trail,
+    material,
+    age: 0,
+    lifetime: THREE.MathUtils.randFloat(28, 42),
+  })
+
+  if (bleedTrails.length > CONSTANTS.BLEED_TRAIL_MAX_COUNT) {
+    const removed = bleedTrails.shift()
+    bleedTrailRoot.remove(removed.mesh)
+    removed.mesh.geometry.dispose()
+    removed.material.dispose()
+  }
+}
+
+function findHealthPackSpawnPoint() {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const angle = Math.random() * Math.PI * 2
+    const radius = THREE.MathUtils.randFloat(9, 30)
+    tempPackSpawnVector.set(Math.cos(angle) * radius, 0.54, Math.sin(angle) * radius)
+
+    if ((tempPackSpawnVector.x * tempPackSpawnVector.x + (tempPackSpawnVector.z - 10) ** 2) < 34) {
+      continue
+    }
+
+    let tooClose = false
+    for (const pack of healthPacks) {
+      if (!pack.active) {
+        continue
+      }
+      tempPackSpacingVector.subVectors(tempPackSpawnVector, pack.mesh.position)
+      if (tempPackSpacingVector.lengthSq() < 16) {
+        tooClose = true
+        break
+      }
+    }
+    if (!tooClose) {
+      return tempPackSpawnVector.clone()
+    }
+  }
+
+  return new THREE.Vector3(
+    THREE.MathUtils.randFloatSpread(48),
+    0.54,
+    THREE.MathUtils.randFloatSpread(48)
+  )
+}
+
+function activateHealthPack(pack) {
+  const spawnPosition = findHealthPackSpawnPoint()
+  pack.mesh.position.copy(spawnPosition)
+  pack.mesh.visible = true
+  pack.active = true
+  pack.respawnTimer = 0
+}
+
+function deactivateHealthPack(pack, respawnSeconds) {
+  pack.mesh.visible = false
+  pack.active = false
+  pack.respawnTimer = respawnSeconds
+}
+
+function spawnPickupBubbles() {
+  for (let i = 0; i < 16; i += 1) {
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff88d8,
+      transparent: true,
+      opacity: THREE.MathUtils.randFloat(0.66, 0.96),
+      depthWrite: false,
+    })
+    material.fog = false
+
+    const mesh = new THREE.Mesh(PICKUP_BUBBLE_GEOMETRY.clone(), material)
+    mesh.position.set(
+      THREE.MathUtils.randFloatSpread(0.85),
+      THREE.MathUtils.randFloat(-0.2, 0.35),
+      THREE.MathUtils.randFloat(-1.55, -0.78)
+    )
+    pickupBubbleRoot.add(mesh)
+
+    tempBubbleVelocity.set(
+      THREE.MathUtils.randFloatSpread(0.5),
+      THREE.MathUtils.randFloat(0.45, 1.3),
+      THREE.MathUtils.randFloat(-0.4, 0.2)
+    )
+    pickupBubbles.push({
+      mesh,
+      material,
+      velocity: tempBubbleVelocity.clone(),
+      age: 0,
+      lifetime: THREE.MathUtils.randFloat(0.55, 0.95),
+    })
+  }
+}
+
+function resetBleedLevelObjects() {
+  clearBleedTrails()
+  clearPickupBubbles()
+
+  for (const pack of healthPacks) {
+    deactivateHealthPack(pack, 0)
+  }
+
+  if (state.currentLevelIndex === 2) {
+    for (const pack of healthPacks) {
+      activateHealthPack(pack)
+    }
+  }
+}
+
+function updatePickupBubbles(delta) {
+  for (let index = pickupBubbles.length - 1; index >= 0; index -= 1) {
+    const bubble = pickupBubbles[index]
+    bubble.age += delta
+    const progress = bubble.age / bubble.lifetime
+    if (progress >= 1) {
+      pickupBubbleRoot.remove(bubble.mesh)
+      bubble.mesh.geometry.dispose()
+      bubble.material.dispose()
+      pickupBubbles.splice(index, 1)
+      continue
+    }
+
+    bubble.mesh.position.addScaledVector(bubble.velocity, delta)
+    bubble.velocity.multiplyScalar(1 - delta * 1.8)
+    bubble.mesh.scale.setScalar(1 + progress * 1.6)
+    bubble.material.opacity = Math.max(0, (1 - progress) * 0.95)
+  }
+}
+
+function updateBleedLevelMechanics(delta) {
+  if (state.currentLevelIndex !== 2) {
+    return
+  }
+
+  const damageTickInterval = CONSTANTS.BLEED_PASSIVE_DAMAGE_INTERVAL_SECONDS
+  state.bleedDamageAccumulator += delta
+  while (state.bleedDamageAccumulator >= damageTickInterval) {
+    state.bleedDamageAccumulator -= damageTickInterval
+    applyPlayerDamage(CONSTANTS.BLEED_PASSIVE_DAMAGE_PER_SECOND * damageTickInterval, {
+      silent: true,
+      noShake: true,
+    })
+    if (state.ended) {
+      return
+    }
+  }
+
+  const nowSeconds = performance.now() * 0.001
+  for (const pack of healthPacks) {
+    if (!pack.active) {
+      pack.respawnTimer -= delta
+      if (pack.respawnTimer <= 0) {
+        activateHealthPack(pack)
+      }
+      continue
+    }
+
+    const pulse = 1 + Math.sin(nowSeconds * 4.2 + pack.pulsePhase) * 0.14
+    pack.mesh.scale.setScalar(pulse)
+    pack.mesh.rotation.y += delta * 0.95
+
+    const dx = pack.mesh.position.x - state.playerPosition.x
+    const dz = pack.mesh.position.z - state.playerPosition.z
+    if (dx * dx + dz * dz <= 1.7) {
+      state.hp = THREE.MathUtils.clamp(
+        state.hp + CONSTANTS.BLEED_HEALTH_PACK_HEAL,
+        0,
+        CONSTANTS.PLAYER_MAX_HP
+      )
+      state.damageFlash = Math.max(0, state.damageFlash - 0.24)
+      spawnPickupBubbles()
+      deactivateHealthPack(pack, CONSTANTS.BLEED_HEALTH_PACK_RESPAWN_SECONDS)
+      updateHud(state, dayNightState, flashlightState, enemies, statsEl, hpBarLabelEl, hpBarFillEl)
+    }
+  }
+
+  const moveX = state.playerPosition.x - state.lastTrailPosition.x
+  const moveZ = state.playerPosition.z - state.lastTrailPosition.z
+  const movedDistance = Math.sqrt(moveX * moveX + moveZ * moveZ)
+  state.bleedTrailAccumulator += delta
+  if (state.onGround && movedDistance > 0.025) {
+    while (state.bleedTrailAccumulator >= CONSTANTS.BLEED_TRAIL_INTERVAL_SECONDS) {
+      state.bleedTrailAccumulator -= CONSTANTS.BLEED_TRAIL_INTERVAL_SECONDS
+      createBloodTrailAt(state.playerPosition)
+    }
+  } else {
+    state.bleedTrailAccumulator = Math.min(
+      state.bleedTrailAccumulator,
+      CONSTANTS.BLEED_TRAIL_INTERVAL_SECONDS * 0.65
+    )
+  }
+  state.lastTrailPosition.copy(state.playerPosition)
+
+  for (let index = bleedTrails.length - 1; index >= 0; index -= 1) {
+    const trail = bleedTrails[index]
+    trail.age += delta
+    const progress = trail.age / trail.lifetime
+    if (progress >= 1) {
+      bleedTrailRoot.remove(trail.mesh)
+      trail.mesh.geometry.dispose()
+      trail.material.dispose()
+      bleedTrails.splice(index, 1)
+      continue
+    }
+    trail.material.opacity = THREE.MathUtils.clamp((1 - progress) * 0.62, 0.08, 0.62)
+  }
+}
+
+function updateShadowSunDamage(delta) {
+  if (state.currentLevelIndex !== 3) {
+    state.inShadow = false
+    return
+  }
+
+  state.inShadow = shadowLevel.isPlayerInShadow(state.playerPosition, CONSTANTS.SHADOW_LEVEL_SUN_DIRECTION)
+  if (state.inShadow) {
+    state.shadowSunDamageAccumulator = 0
+    return
+  }
+
+  const damageTickInterval = CONSTANTS.SHADOW_SUN_DAMAGE_INTERVAL_SECONDS
+  state.shadowSunDamageAccumulator += delta
+  while (state.shadowSunDamageAccumulator >= damageTickInterval) {
+    state.shadowSunDamageAccumulator -= damageTickInterval
+    applyPlayerDamage(CONSTANTS.SHADOW_SUN_DAMAGE_PER_SECOND * damageTickInterval, {
+      silent: true,
+      noShake: true,
+    })
+    if (state.ended) {
+      return
+    }
+  }
+}
+
+function applyFixedDayEnvironment() {
+  const sunPosition = getFixedSunPosition()
+  dayNightState.dayFactor = 1
+
+  scene.background.copy(CONSTANTS.SKY_DAY_COLOR)
+  scene.fog.color.copy(CONSTANTS.FOG_DAY_COLOR)
+  scene.fog.near = 35
+  scene.fog.far = 85
+
+  hemiLight.intensity = 0.64
+  sunLight.intensity = 1.26
+  sunLight.color.copy(CONSTANTS.SUN_DAY_COLOR)
+  sunLight.position.copy(sunPosition)
+  sunLightTarget.position.set(0, 0.8, 0)
+
+  moonLight.intensity = 0
+  moonOrbMaterial.opacity = 0
+  moonOrb.position.set(sunPosition.x * -0.5, 10, sunPosition.z * -0.5)
+
+  sunOrb.position.copy(sunPosition)
+  const sunScale = state.currentLevelIndex === 3 ? 3.1 : 1.36
+  sunOrb.scale.setScalar(sunScale)
+  sunOrbMaterial.opacity = 1
+
+  flashlight.intensity = 0
+  flashlightFocus.intensity = 0
 }
 
 function spawnEnemyForCurrentLevel() {
@@ -408,14 +818,20 @@ function resetRound() {
   state.yaw = 0
   state.pitch = 0
   state.lavaDamageAccumulator = 0
+  state.bleedDamageAccumulator = 0
+  state.shadowSunDamageAccumulator = 0
+  state.bleedTrailAccumulator = 0
+  state.inShadow = false
   flashlightState.battery = 1
   flashlightState.flickerTimeLeft = 0
   flashlightState.flickerMultiplier = 1
   flashlightState.lastUpdateMs = performance.now()
+  resetBleedLevelObjects()
 
   const activeLevel = getActiveLevelSystem()
   activeLevel.update()
   state.playerPosition.copy(activeLevel.getPlayerSpawnPoint(CONSTANTS.PLAYER_HEIGHT))
+  state.lastTrailPosition.copy(state.playerPosition)
   orientPlayerViewForSpawn()
 
   for (let i = 0; i < 6; i += 1) {
@@ -622,12 +1038,14 @@ function updateRoundState(delta) {
 
   processInput(delta)
   const activePeaceSystem = getActivePeaceSystem()
-  if (activePeaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
+  if (activePeaceSystem && activePeaceSystem.checkPeacefulWinCondition(state.playerPosition)) {
     endRound(true, `你在${getActiveLevelMeta().name}抵达灯塔，成功和平撤离`)
     return
   }
 
   updateLavaDamage(delta)
+  updateBleedLevelMechanics(delta)
+  updateShadowSunDamage(delta)
   if (state.ended) {
     return
   }
@@ -723,11 +1141,15 @@ startBtn.addEventListener('click', beginRound)
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
   updateDayNightCycle()
+  if (isFixedDayLevel()) {
+    applyFixedDayEnvironment()
+  }
   grassPeaceSystem.updatePeaceLighthouse()
   lavaPeaceSystem.updatePeaceLighthouse()
   updateRoundState(delta)
   updateBloodBursts(world, bloodBursts, delta)
   updateHitRings(world, hitRings, camera, delta)
+  updatePickupBubbles(delta)
   updateDamageOverlay(state, delta, damageOverlayEl)
   applyCameraShake(state, camera, delta, CONSTANTS.CAMERA_SHAKE_DECAY)
   renderer.render(scene, camera)

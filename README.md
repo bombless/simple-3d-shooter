@@ -8,22 +8,25 @@ Three.js + Vite で作られた、軽量な一人称 3D サバイバルシュー
 
 ## 中文说明
 
-### 玩法概览
+### 关卡结构（四关）
+
+1. 荒野防线：常规战斗，支持灯塔和平撤离。
+2. 熔岩平台：移动平台 + 岩浆伤害，支持灯塔和平撤离。
+3. 失血平原：固定白昼，玩家持续失血；需捡血包维持生命，地面会留下血迹；拾取血包会出现粉色泡泡。
+4. 烈日柱阵：固定白昼 + 巨大太阳；地图由高大白柱组成，玩家在阴影下才不会持续掉血。
+
+### 核心玩法
 
 - 第一人称射击，`W/A/S/D` 移动，`Space` 跳跃，鼠标左键射击
-- 双关卡结构
-- 第一关：荒野防线（可战斗胜利，也可灯塔和平撤离）
-- 第二关：熔岩平台（可战斗胜利，也可灯塔和平撤离）
-- 50 秒昼夜循环（进入第二关时会重置到夜晚）
-- 夜间手电筒电量机制（夜耗电、昼回充）
 - 命中反馈：金色命中光圈
-- 敌人：克苏鲁风肉球体，持续追击玩家
+- 敌人持续追击玩家
+- 回合制生存目标 + 关卡推进
 
 ### 胜负条件
 
 - 击败 `20` 个敌人立即胜利
 - 或存活 `90` 秒胜利
-- 或抵达当前关卡灯塔和平撤离胜利
+- 第一、二关可通过抵达灯塔和平撤离获胜
 - 生命值降为 `0` 则失败
 
 ### 运行环境
@@ -51,22 +54,25 @@ npm run build
 
 ## English
 
-### Gameplay
+### Stage Structure (4 Stages)
 
-- First-person shooter controls: `W/A/S/D` move, `Space` jump, left mouse to shoot
-- Two-stage progression
-- Stage 1: Frontier Field (combat win or pacifist lighthouse extraction)
-- Stage 2: Lava Platforms (combat win or pacifist lighthouse extraction)
-- 50-second day/night cycle (resets to night when entering stage 2)
-- Flashlight battery system (drains at night, recharges in daylight)
-- Hit feedback uses a golden hit ring effect
-- Eldritch enemies continuously chase the player
+1. Frontier Field: standard combat stage with pacifist lighthouse extraction.
+2. Lava Platforms: moving platforms + lava hazard, also supports lighthouse extraction.
+3. Bleed Plains: fixed daylight; the player constantly loses HP and must collect health packs. Blood trails appear on the ground, and collecting a pack triggers pink bubbles on screen.
+4. Sun Pillars: fixed daylight with a giant sun. The map contains only tall white pillars; the player must stay in pillar shadows to avoid HP drain.
+
+### Core Gameplay
+
+- First-person controls: `W/A/S/D` move, `Space` jump, left mouse to shoot
+- Golden hit ring feedback on successful hits
+- Enemies continuously chase the player
+- Round-based survival goals with stage progression
 
 ### Win / Lose Conditions
 
 - Win by defeating `20` enemies
 - Or win by surviving for `90` seconds
-- Or win by reaching the lighthouse extraction point in the current stage
+- Stages 1 and 2 also allow pacifist lighthouse extraction wins
 - Lose when HP reaches `0`
 
 ### Requirements
@@ -94,23 +100,26 @@ npm run build
 
 ## 日本語
 
-### ゲーム概要
+### ステージ構成（全4ステージ）
 
-- 一人称シューティング操作: `W/A/S/D` 移動、`Space` ジャンプ、左クリックで射撃
-- 2ステージ構成
-- 第1ステージ: 荒野防衛線（戦闘勝利または灯台への平和撤退）
-- 第2ステージ: 溶岩プラットフォーム（戦闘勝利または灯台への平和撤退）
-- 50秒の昼夜サイクル（第2ステージ開始時に夜へリセット）
-- 懐中電灯バッテリー（夜に消耗、昼に回復）
-- ヒット時は金色リングでフィードバック
-- 異形の敵が継続してプレイヤーを追跡
+1. 荒野防衛線：通常戦闘ステージ。灯台への平和撤退ルートあり。
+2. 溶岩プラットフォーム：移動足場 + 溶岩ダメージ。こちらも灯台撤退可能。
+3. 出血平原：固定の昼。プレイヤーは継続的にHPが減少し、回復パック回収が必要。地面に血痕が残り、回収時はピンク色バブルが表示。
+4. 烈日柱陣：固定の昼 + 巨大な太陽。高い白柱のみの地形で、柱の影にいる間だけ継続ダメージを回避可能。
+
+### 基本プレイ
+
+- 一人称操作：`W/A/S/D` 移動、`Space` ジャンプ、左クリックで射撃
+- 命中時は金色リングでフィードバック
+- 敵は常にプレイヤーを追跡
+- ラウンド制の生存目標 + ステージ進行
 
 ### 勝敗条件
 
 - 敵を `20` 体倒すと勝利
 - または `90` 秒生存で勝利
-- または現在ステージの灯台到達で平和勝利
-- HP が `0` で敗北
+- 第1・第2ステージは灯台への平和撤退でも勝利
+- HP が `0` になると敗北
 
 ### 動作環境
 
