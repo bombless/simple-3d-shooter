@@ -4,5 +4,6 @@ const repoName = 'simple-3d-shooter'
 
 export default defineConfig({
   // GitHub Pages project sites are hosted under /<repo>/.
-  base: process.env.GITHUB_ACTIONS ? `/${repoName}/` : '/',
+  // Android WebView (Capacitor) needs relative asset paths in production build.
+  base: process.env.GITHUB_ACTIONS ? `/${repoName}/` : './',
 })

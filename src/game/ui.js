@@ -35,7 +35,10 @@ export function updateHud(state, dayNightState, flashlightState, enemies, statsE
   const torchLabel = `${Math.round(flashlightState.battery * 100)}%`
   const levelLabel = state.levelLabel ? ` | LEVEL: ${state.levelLabel}` : ''
   const colorStateLabel =
-    state.currentLevelIndex === 4 ? ` | COLOR: ${state.colorCurseLabel || '白'}` : ''
-  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel} | TORCH: ${torchLabel}${levelLabel}${colorStateLabel}`
+    state.currentLevelIndex === 4 || state.currentLevelIndex === 7
+      ? ` | COLOR: ${state.colorCurseLabel || '白'}`
+      : ''
+  const objectiveLabel = state.levelObjectiveText || ''
+  statsEl.textContent = `HP: ${Math.max(0, Math.ceil(state.hp))} | SCORE: ${state.score} | ENEMIES: ${enemies.length} | TIME: ${Math.max(0, Math.ceil(state.timeLeft))} | LIGHT: ${phaseLabel} | TORCH: ${torchLabel}${levelLabel}${colorStateLabel}${objectiveLabel}`
   updateHpUi(state, hpBarLabelEl, hpBarFillEl)
 }
