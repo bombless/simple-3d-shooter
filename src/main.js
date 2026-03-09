@@ -64,6 +64,8 @@ const damageOverlayEl = document.querySelector('#damage-overlay')
 
 const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 八关生存挑战 | Esc 暂停 | R 重开'
 const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 八关生存挑战 | 建议横屏并开启全屏'
+const ANDROID_NATIVE_MOBILE_TIPS_TEXT =
+  '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 八关生存挑战 | 默认全屏（不可切换）'
 const MOBILE_LOOK_SENSITIVITY = 0.0038
 const MOBILE_TAP_MOVE_THRESHOLD = 10
 const MOBILE_TAP_MAX_DURATION_MS = 240
@@ -105,6 +107,18 @@ const mobileControls = {
   comboActive: false,
   comboExpiresAtMs: -Infinity,
 }
+
+const isAndroidNativeApp = (() => {
+  const platform = window.Capacitor?.getPlatform?.()
+  const isNative = window.Capacitor?.isNativePlatform?.() === true
+  if (isNative && platform === 'android') {
+    return true
+  }
+
+  // Fallback for environments where Capacitor global is not fully initialized yet.
+  return window.location.protocol === 'capacitor:' && /Android/i.test(navigator.userAgent)
+})()
+
 const enemySpawnIntervalSeconds = mobileControls.enabled
   ? CONSTANTS.ENEMY_SPAWN_INTERVAL_MOBILE_SECONDS
   : CONSTANTS.ENEMY_SPAWN_INTERVAL_DESKTOP_SECONDS
@@ -570,7 +584,11 @@ function resetDayNightToNight() {
 }
 
 function syncControlTips() {
-  tipsEl.textContent = mobileControls.enabled ? MOBILE_TIPS_TEXT : DESKTOP_TIPS_TEXT
+  if (!mobileControls.enabled) {
+    tipsEl.textContent = DESKTOP_TIPS_TEXT
+    return
+  }
+  tipsEl.textContent = isAndroidNativeApp ? ANDROID_NATIVE_MOBILE_TIPS_TEXT : MOBILE_TIPS_TEXT
 }
 
 function setAimPointerFromClientPosition(clientX, clientY) {
@@ -596,6 +614,11 @@ function canUseFullscreen() {
 }
 
 function updateFullscreenButtonState() {
+  if (isAndroidNativeApp) {
+    mobileFullscreenBtn.classList.remove('visible')
+    return
+  }
+
   if (!mobileControls.enabled) {
     mobileFullscreenBtn.classList.remove('visible')
     return
@@ -612,6 +635,10 @@ function updateFullscreenButtonState() {
 }
 
 async function toggleFullscreen() {
+  if (isAndroidNativeApp) {
+    return
+  }
+
   if (!canUseFullscreen()) {
     return
   }
