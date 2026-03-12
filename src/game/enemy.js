@@ -1,8 +1,18 @@
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { ENEMY_BASE_HEIGHT } from './constants'
 import { normalizeAngle, randomSpawn } from './utils'
 
 const snakeTextureCache = new Map()
+const COBRA_MODEL_URL = '/models/snake_cobra_animated_base_model.glb'
+const cobraLoader = new GLTFLoader()
+let cobraTemplate = null
+let cobraTemplatePromise = null
+let cobraTemplateFailed = false
+const tempCobraBox = new THREE.Box3()
+const tempCobraSize = new THREE.Vector3()
+const tempCobraCenter = new THREE.Vector3()
 
 function colorFromProfile(baseColor, options = {}) {
   const {
@@ -129,8 +139,185 @@ function createSnakeMaterial({
   })
 }
 
+function applyColorProfileToMaterial(material, colorProfile) {
+  if (!material || !colorProfile) {
+    return
+  }
+  if (material.color) {
+    material.color.copy(
+      new THREE.Color(colorProfile.enemyColor).lerp(new THREE.Color(0xffffff), 0.08)
+    )
+  }
+  if (material.emissive) {
+    material.emissive.copy(new THREE.Color(colorProfile.enemyEmissive))
+    material.emissiveIntensity = Math.max(material.emissiveIntensity || 0, 0.28)
+  }
+}
+
+function cloneMaterialsAndGeometry(root, colorProfile) {
+  root.traverse((node) => {
+    if (!node.isMesh) {
+      return
+    }
+
+    node.castShadow = true
+    node.receiveShadow = true
+
+    if (node.geometry) {
+      node.geometry = node.geometry.clone()
+    }
+
+    if (Array.isArray(node.material)) {
+      node.material = node.material.map((material) => {
+        const cloned = material.clone()
+        applyColorProfileToMaterial(cloned, colorProfile)
+        return cloned
+      })
+      return
+    }
+
+    if (node.material) {
+      node.material = node.material.clone()
+      applyColorProfileToMaterial(node.material, colorProfile)
+    }
+  })
+}
+
+function ensureCobraTemplateLoaded() {
+  if (cobraTemplate || cobraTemplateFailed) {
+    return
+  }
+  if (cobraTemplatePromise) {
+    return
+  }
+
+  cobraTemplatePromise = new Promise((resolve) => {
+    cobraLoader.load(
+      COBRA_MODEL_URL,
+      (gltf) => {
+        cobraTemplate = {
+          scene: gltf.scene,
+          animations: gltf.animations || [],
+        }
+        resolve(cobraTemplate)
+      },
+      undefined,
+      () => {
+        cobraTemplateFailed = true
+        resolve(null)
+      }
+    )
+  })
+}
+
+ensureCobraTemplateLoaded()
+
+function trySpawnCobraEnemy(world, enemies, spawnPosition, colorProfile) {
+  if (!cobraTemplate) {
+    return null
+  }
+
+  const mesh = new THREE.Group()
+  mesh.position.copy(spawnPosition || randomSpawn(ENEMY_BASE_HEIGHT))
+
+  const core = skeletonClone(cobraTemplate.scene)
+  cloneMaterialsAndGeometry(core, colorProfile)
+  mesh.add(core)
+
+  let modelBaseYaw = 0
+  tempCobraBox.setFromObject(core)
+  tempCobraBox.getSize(tempCobraSize)
+  if (tempCobraSize.x > tempCobraSize.z) {
+    core.rotation.y = Math.PI * 0.5
+    modelBaseYaw = Math.PI * 0.5
+  }
+  modelBaseYaw += Math.PI
+  core.rotation.y = modelBaseYaw
+
+  tempCobraBox.setFromObject(core)
+  tempCobraBox.getSize(tempCobraSize)
+  const rawLength = Math.max(tempCobraSize.x, tempCobraSize.z, 0.001)
+  const targetLength = THREE.MathUtils.randFloat(15.5, 20.5)
+  const modelScale = targetLength / rawLength
+  core.scale.setScalar(modelScale)
+
+  tempCobraBox.setFromObject(core)
+  tempCobraBox.getCenter(tempCobraCenter)
+  core.position.sub(tempCobraCenter)
+  tempCobraBox.setFromObject(core)
+  core.position.y -= tempCobraBox.min.y
+
+  tempCobraBox.setFromObject(core)
+  tempCobraBox.getSize(tempCobraSize)
+  tempCobraBox.getCenter(tempCobraCenter)
+
+  const hitbox = new THREE.Mesh(
+    new THREE.BoxGeometry(
+      Math.max(1.2, tempCobraSize.x * 1.02),
+      Math.max(1.0, tempCobraSize.y * 1.06),
+      Math.max(2.2, tempCobraSize.z * 1.04)
+    ),
+    new THREE.MeshBasicMaterial({ visible: false })
+  )
+  hitbox.position.copy(tempCobraCenter)
+  hitbox.userData.enemyMesh = mesh
+  mesh.add(hitbox)
+
+  let mixer = null
+  if (cobraTemplate.animations.length > 0) {
+    mixer = new THREE.AnimationMixer(core)
+    for (const clip of cobraTemplate.animations) {
+      const action = mixer.clipAction(clip)
+      action.enabled = true
+      action.clampWhenFinished = false
+      action.loop = THREE.LoopRepeat
+      action.play()
+    }
+  }
+
+  const enemy = {
+    mesh,
+    core,
+    organs: [],
+    eyes: [],
+    tentacles: [],
+    hitbox,
+    corePulseSpeed: THREE.MathUtils.randFloat(1.8, 3.1),
+    phase: Math.random() * Math.PI * 2,
+    spinSpeed: THREE.MathUtils.randFloat(0.55, 0.95),
+    speed: THREE.MathUtils.randFloat(1.8, 2.9),
+    damageCooldown: THREE.MathUtils.randFloat(0.2, 0.9),
+    colorKey: colorProfile ? colorProfile.key : null,
+    slitherSpeed: THREE.MathUtils.randFloat(4.4, 6.6),
+    slitherAmplitude: THREE.MathUtils.randFloat(0.13, 0.24),
+    headBobAmplitude: THREE.MathUtils.randFloat(0.03, 0.065),
+    headBobSpeed: THREE.MathUtils.randFloat(3.4, 5.8),
+    gaitSpeed: THREE.MathUtils.randFloat(3.8, 5.6),
+    gaitAmplitude: THREE.MathUtils.randFloat(0.26, 0.42),
+    coreBaseY: core.position.y,
+    coreBaseYaw: modelBaseYaw,
+    mixer,
+    animationSpeed: THREE.MathUtils.randFloat(0.85, 1.15),
+    useExternalModel: true,
+  }
+
+  enemies.push(enemy)
+  world.add(mesh)
+  return enemy
+}
+
 export function spawnEnemy(world, enemies, options = {}) {
   const { spawnPosition, colorProfile = null } = options
+  ensureCobraTemplateLoaded()
+
+  const modelEnemy = trySpawnCobraEnemy(world, enemies, spawnPosition, colorProfile)
+  if (modelEnemy) {
+    return modelEnemy
+  }
+  if (!cobraTemplateFailed) {
+    return null
+  }
+
   const mesh = new THREE.Group()
   mesh.position.copy(spawnPosition || randomSpawn(ENEMY_BASE_HEIGHT))
 
@@ -405,63 +592,76 @@ export function updateEnemies(
       enemy.mesh.position.addScaledVector(tempEnemySide, gaitVelocity * delta)
     }
 
-    const headBreath = 1 + Math.sin(now * enemy.corePulseSpeed + enemy.phase) * 0.05
-    const jawPulse = 1 + Math.sin(now * (enemy.corePulseSpeed * 1.2) + enemy.phase * 1.1) * 0.04
-    enemy.core.scale.set(1.18 * headBreath, 0.82 * jawPulse, 1.42 * headBreath)
-    enemy.core.position.y = 0.06 + Math.sin(now * enemy.headBobSpeed + enemy.phase) * enemy.headBobAmplitude
-    enemy.core.rotation.x = Math.sin(now * (enemy.headBobSpeed * 0.52) + enemy.phase) * 0.08
-    enemy.core.rotation.y = Math.sin(now * (enemy.slitherSpeed * 0.46) + enemy.phase) * 0.12
-
-    for (const organ of enemy.organs) {
-      const wave = Math.sin(now * enemy.slitherSpeed + enemy.phase - organ.waveOffset)
-      const waveLift = Math.cos(
-        now * (enemy.slitherSpeed * 0.66) + enemy.phase * 0.7 - organ.waveOffset * 0.92
-      )
-      const surge = Math.sin(now * organ.pulseSpeed + organ.phase) * organ.pulseAmplitude
-      const stretch = 1 + surge * 0.9
-      organ.mesh.position.x = wave * enemy.slitherAmplitude * organ.lateralWeight
-      organ.mesh.position.y = waveLift * enemy.slitherAmplitude * 0.22 * organ.verticalWeight
-      organ.mesh.position.z = organ.baseZ
-      organ.mesh.rotation.y = wave * 0.22
-      organ.mesh.scale.set(
-        organ.baseScale.x * stretch,
-        organ.baseScale.y * (1 + surge * 0.35),
-        organ.baseScale.z * stretch
-      )
+    if (enemy.mixer) {
+      enemy.mixer.update(delta * (enemy.animationSpeed || 1))
     }
 
-    for (const eye of enemy.eyes) {
-      eye.sclera.lookAt(camera.position)
-      const dilation = 0.88 + Math.sin(now * eye.pulseSpeed + eye.phase) * 0.18
-      const wanderX = Math.sin(now * (eye.pulseSpeed * 1.7) + eye.phase) * eye.wanderAmplitude
-      const wanderY = Math.cos(now * (eye.pulseSpeed * 1.3) + eye.phase) * eye.wanderAmplitude * 0.58
-      eye.pupil.position.set(wanderX, wanderY, eye.pupilDepth)
-      eye.pupil.scale.set(dilation, dilation * 0.78, dilation)
-    }
+    if (enemy.useExternalModel) {
+      enemy.core.position.y =
+        enemy.coreBaseY + Math.sin(now * enemy.headBobSpeed + enemy.phase) * enemy.headBobAmplitude
+      enemy.core.rotation.x = Math.sin(now * (enemy.headBobSpeed * 0.42) + enemy.phase) * 0.05
+      enemy.core.rotation.y =
+        enemy.coreBaseYaw + Math.sin(now * (enemy.slitherSpeed * 0.36) + enemy.phase) * 0.06
+    } else {
+      const headBreath = 1 + Math.sin(now * enemy.corePulseSpeed + enemy.phase) * 0.05
+      const jawPulse = 1 + Math.sin(now * (enemy.corePulseSpeed * 1.2) + enemy.phase * 1.1) * 0.04
+      enemy.core.scale.set(1.18 * headBreath, 0.82 * jawPulse, 1.42 * headBreath)
+      enemy.core.position.y = 0.06 + Math.sin(now * enemy.headBobSpeed + enemy.phase) * enemy.headBobAmplitude
+      enemy.core.rotation.x = Math.sin(now * (enemy.headBobSpeed * 0.52) + enemy.phase) * 0.08
+      enemy.core.rotation.y = Math.sin(now * (enemy.slitherSpeed * 0.46) + enemy.phase) * 0.12
 
-    for (const tentacle of enemy.tentacles) {
-      for (const segment of tentacle.segments) {
-        const progress = (segment.segmentIndex + 1) / tentacle.segmentCount
-        const wave =
-          Math.sin(now * tentacle.swaySpeed + tentacle.phase + segment.segmentIndex * 0.62) *
-          tentacle.swayAmplitude *
-          progress
-        const lift =
-          Math.max(
-            0,
-            Math.cos(
-              now * (tentacle.swaySpeed * 1.46) +
-                tentacle.phase * 0.7 +
-                segment.segmentIndex * 0.44
-            )
-          ) *
-          tentacle.swayAmplitude *
-          0.9 *
-          progress
-        segment.mesh.position
-          .copy(segment.basePosition)
-          .addScaledVector(tentacle.tangentA, wave)
-          .addScaledVector(tentacle.tangentB, lift)
+      for (const organ of enemy.organs) {
+        const wave = Math.sin(now * enemy.slitherSpeed + enemy.phase - organ.waveOffset)
+        const waveLift = Math.cos(
+          now * (enemy.slitherSpeed * 0.66) + enemy.phase * 0.7 - organ.waveOffset * 0.92
+        )
+        const surge = Math.sin(now * organ.pulseSpeed + organ.phase) * organ.pulseAmplitude
+        const stretch = 1 + surge * 0.9
+        organ.mesh.position.x = wave * enemy.slitherAmplitude * organ.lateralWeight
+        organ.mesh.position.y = waveLift * enemy.slitherAmplitude * 0.22 * organ.verticalWeight
+        organ.mesh.position.z = organ.baseZ
+        organ.mesh.rotation.y = wave * 0.22
+        organ.mesh.scale.set(
+          organ.baseScale.x * stretch,
+          organ.baseScale.y * (1 + surge * 0.35),
+          organ.baseScale.z * stretch
+        )
+      }
+
+      for (const eye of enemy.eyes) {
+        eye.sclera.lookAt(camera.position)
+        const dilation = 0.88 + Math.sin(now * eye.pulseSpeed + eye.phase) * 0.18
+        const wanderX = Math.sin(now * (eye.pulseSpeed * 1.7) + eye.phase) * eye.wanderAmplitude
+        const wanderY =
+          Math.cos(now * (eye.pulseSpeed * 1.3) + eye.phase) * eye.wanderAmplitude * 0.58
+        eye.pupil.position.set(wanderX, wanderY, eye.pupilDepth)
+        eye.pupil.scale.set(dilation, dilation * 0.78, dilation)
+      }
+
+      for (const tentacle of enemy.tentacles) {
+        for (const segment of tentacle.segments) {
+          const progress = (segment.segmentIndex + 1) / tentacle.segmentCount
+          const wave =
+            Math.sin(now * tentacle.swaySpeed + tentacle.phase + segment.segmentIndex * 0.62) *
+            tentacle.swayAmplitude *
+            progress
+          const lift =
+            Math.max(
+              0,
+              Math.cos(
+                now * (tentacle.swaySpeed * 1.46) +
+                  tentacle.phase * 0.7 +
+                  segment.segmentIndex * 0.44
+              )
+            ) *
+            tentacle.swayAmplitude *
+            0.9 *
+            progress
+          segment.mesh.position
+            .copy(segment.basePosition)
+            .addScaledVector(tentacle.tangentA, wave)
+            .addScaledVector(tentacle.tangentB, lift)
+        }
       }
     }
 
