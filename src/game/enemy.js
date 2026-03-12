@@ -5,7 +5,7 @@ import { ENEMY_BASE_HEIGHT } from './constants'
 import { normalizeAngle, randomSpawn } from './utils'
 
 const snakeTextureCache = new Map()
-const COBRA_MODEL_URL = '/models/snake_cobra_animated_base_model.glb'
+const COBRA_MODEL_URL = `${import.meta.env.BASE_URL}models/snake_cobra_animated_base_model.glb`
 const cobraLoader = new GLTFLoader()
 let cobraTemplate = null
 let cobraTemplatePromise = null
