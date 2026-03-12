@@ -5,7 +5,7 @@ import { ENEMY_BASE_HEIGHT } from './constants'
 import { normalizeAngle, randomSpawn } from './utils'
 
 const snakeTextureCache = new Map()
-const COBRA_MODEL_URL = `${import.meta.env.BASE_URL}models/snake_cobra_animated_base_model.glb`
+const COBRA_MODEL_URL = `${import.meta.env.BASE_URL}models/cc0-striped-snake-elaphe-quadrivirgata/source/Q10983-3-1_animation_9_0_8.glb`
 const cobraLoader = new GLTFLoader()
 let cobraTemplate = null
 let cobraTemplatePromise = null
@@ -13,6 +13,12 @@ let cobraTemplateFailed = false
 const tempCobraBox = new THREE.Box3()
 const tempCobraSize = new THREE.Vector3()
 const tempCobraCenter = new THREE.Vector3()
+const tempExternalHitboxWorldBox = new THREE.Box3()
+const tempExternalHitboxLocalBox = new THREE.Box3()
+const tempExternalHitboxSize = new THREE.Vector3()
+const tempExternalHitboxCenter = new THREE.Vector3()
+const tempExternalHitboxInverseMeshMatrix = new THREE.Matrix4()
+let externalHitboxFrameCounter = 0
 
 function colorFromProfile(baseColor, options = {}) {
   const {
@@ -212,6 +218,28 @@ function ensureCobraTemplateLoaded() {
 
 ensureCobraTemplateLoaded()
 
+function syncExternalEnemyHitbox(enemy) {
+  enemy.core.updateMatrixWorld(true)
+  tempExternalHitboxWorldBox.setFromObject(enemy.core)
+  if (!Number.isFinite(tempExternalHitboxWorldBox.min.x)) {
+    return
+  }
+
+  tempExternalHitboxInverseMeshMatrix.copy(enemy.mesh.matrixWorld).invert()
+  tempExternalHitboxLocalBox
+    .copy(tempExternalHitboxWorldBox)
+    .applyMatrix4(tempExternalHitboxInverseMeshMatrix)
+  tempExternalHitboxLocalBox.getSize(tempExternalHitboxSize)
+  tempExternalHitboxLocalBox.getCenter(tempExternalHitboxCenter)
+
+  enemy.hitbox.scale.set(
+    Math.max(1.2, tempExternalHitboxSize.x * 1.02),
+    Math.max(1.0, tempExternalHitboxSize.y * 1.06),
+    Math.max(2.2, tempExternalHitboxSize.z * 1.04)
+  )
+  enemy.hitbox.position.copy(tempExternalHitboxCenter)
+}
+
 function trySpawnCobraEnemy(world, enemies, spawnPosition, colorProfile) {
   if (!cobraTemplate) {
     return null
@@ -252,14 +280,9 @@ function trySpawnCobraEnemy(world, enemies, spawnPosition, colorProfile) {
   tempCobraBox.getCenter(tempCobraCenter)
 
   const hitbox = new THREE.Mesh(
-    new THREE.BoxGeometry(
-      Math.max(1.2, tempCobraSize.x * 1.02),
-      Math.max(1.0, tempCobraSize.y * 1.06),
-      Math.max(2.2, tempCobraSize.z * 1.04)
-    ),
+    new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshBasicMaterial({ visible: false })
   )
-  hitbox.position.copy(tempCobraCenter)
   hitbox.userData.enemyMesh = mesh
   mesh.add(hitbox)
 
@@ -299,8 +322,10 @@ function trySpawnCobraEnemy(world, enemies, spawnPosition, colorProfile) {
     mixer,
     animationSpeed: THREE.MathUtils.randFloat(0.85, 1.15),
     useExternalModel: true,
+    hitboxSyncOffset: THREE.MathUtils.randInt(0, 2),
   }
 
+  syncExternalEnemyHitbox(enemy)
   enemies.push(enemy)
   world.add(mesh)
   return enemy
@@ -558,6 +583,96 @@ export function clearEnemies(world, enemies) {
   }
 }
 
+function setHitboxMaterialDebugMode(material, enabled, enemy) {
+  if (!material) {
+    return
+  }
+
+  if (!enemy._hitboxMaterialBase) {
+    enemy._hitboxMaterialBase = {
+      visible: material.visible,
+      wireframe: Boolean(material.wireframe),
+      transparent: Boolean(material.transparent),
+      opacity: typeof material.opacity === 'number' ? material.opacity : 1,
+      depthWrite: material.depthWrite !== false,
+      depthTest: material.depthTest !== false,
+      color:
+        material.color && typeof material.color.getHex === 'function'
+          ? material.color.getHex()
+          : null,
+    }
+  }
+
+  const base = enemy._hitboxMaterialBase
+  if (enabled) {
+    material.visible = true
+    material.wireframe = true
+    material.transparent = true
+    material.opacity = 0.5
+    material.depthWrite = false
+    material.depthTest = true
+    if (material.color) {
+      material.color.setHex(0x42f57b)
+    }
+    return
+  }
+
+  material.visible = base.visible
+  material.wireframe = base.wireframe
+  material.transparent = base.transparent
+  material.opacity = base.opacity
+  material.depthWrite = base.depthWrite
+  material.depthTest = base.depthTest
+  if (material.color && base.color !== null) {
+    material.color.setHex(base.color)
+  }
+}
+
+export function setEnemyDebugRenderMode(enemy, hitboxOnly = false) {
+  if (!enemy || !enemy.hitbox) {
+    return
+  }
+
+  if (enemy.core) {
+    enemy.core.visible = !hitboxOnly
+  }
+
+  for (const organ of enemy.organs || []) {
+    if (organ?.mesh) {
+      organ.mesh.visible = !hitboxOnly
+    }
+  }
+
+  for (const eye of enemy.eyes || []) {
+    if (eye?.sclera) {
+      eye.sclera.visible = !hitboxOnly
+    }
+  }
+
+  for (const tentacle of enemy.tentacles || []) {
+    for (const segment of tentacle?.segments || []) {
+      if (segment?.mesh) {
+        segment.mesh.visible = !hitboxOnly
+      }
+    }
+  }
+
+  const hitboxMaterial = enemy.hitbox.material
+  if (Array.isArray(hitboxMaterial)) {
+    for (const material of hitboxMaterial) {
+      setHitboxMaterialDebugMode(material, hitboxOnly, enemy)
+    }
+  } else {
+    setHitboxMaterialDebugMode(hitboxMaterial, hitboxOnly, enemy)
+  }
+}
+
+export function setEnemiesDebugRenderMode(enemies, hitboxOnly = false) {
+  for (const enemy of enemies) {
+    setEnemyDebugRenderMode(enemy, hitboxOnly)
+  }
+}
+
 const tempEnemyToPlayer = new THREE.Vector3()
 const tempEnemySide = new THREE.Vector3()
 
@@ -570,6 +685,7 @@ export function updateEnemies(
   onEnemyHitPlayer = null
 ) {
   const now = performance.now() * 0.001
+  externalHitboxFrameCounter += 1
 
   for (const enemy of enemies) {
     tempEnemyToPlayer.subVectors(state.playerPosition, enemy.mesh.position)
@@ -602,6 +718,10 @@ export function updateEnemies(
       enemy.core.rotation.x = Math.sin(now * (enemy.headBobSpeed * 0.42) + enemy.phase) * 0.05
       enemy.core.rotation.y =
         enemy.coreBaseYaw + Math.sin(now * (enemy.slitherSpeed * 0.36) + enemy.phase) * 0.06
+      const hitboxSyncStride = distance < 6 ? 2 : 3
+      if ((externalHitboxFrameCounter + enemy.hitboxSyncOffset) % hitboxSyncStride === 0) {
+        syncExternalEnemyHitbox(enemy)
+      }
     } else {
       const headBreath = 1 + Math.sin(now * enemy.corePulseSpeed + enemy.phase) * 0.05
       const jawPulse = 1 + Math.sin(now * (enemy.corePulseSpeed * 1.2) + enemy.phase * 1.1) * 0.04

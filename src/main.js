@@ -10,7 +10,14 @@ import { createShadowPillarLevel } from './game/shadowPillarLevel'
 import { createColorTrialLevel } from './game/colorTrialLevel'
 import { createSolarCycleLevel } from './game/solarCycleLevel'
 import { processPlayerInput } from './game/playerMovement'
-import { spawnEnemy, removeEnemy, clearEnemies, updateEnemies } from './game/enemy'
+import {
+  spawnEnemy,
+  removeEnemy,
+  clearEnemies,
+  updateEnemies,
+  setEnemyDebugRenderMode,
+  setEnemiesDebugRenderMode,
+} from './game/enemy'
 import { spawnBloodBurst, clearBloodBursts, updateBloodBursts } from './game/blood'
 import { spawnHitRing, clearHitRings, updateHitRings } from './game/hitRing'
 import { updateDamageOverlay, updateHud } from './game/ui'
@@ -62,7 +69,8 @@ const hpBarLabelEl = document.querySelector('#hp-bar-label')
 const hpBarFillEl = document.querySelector('#hp-bar-fill')
 const damageOverlayEl = document.querySelector('#damage-overlay')
 
-const DESKTOP_TIPS_TEXT = 'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 八关生存挑战 | Esc 暂停 | R 重开'
+const DESKTOP_TIPS_TEXT =
+  'WASD 移动 | Space 跳跃 | 鼠标瞄准 | 左键射击 | 八关生存挑战 | Esc 暂停 | R 重开 | E 碰撞盒视图'
 const MOBILE_TIPS_TEXT = '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 八关生存挑战 | 建议横屏并开启全屏'
 const ANDROID_NATIVE_MOBILE_TIPS_TEXT =
   '拖动屏幕转向 | 单击向前跳 | 双击开火并进入连击 | 八关生存挑战 | 默认全屏（不可切换）'
@@ -209,6 +217,11 @@ const moonOrbMaterial = new THREE.MeshBasicMaterial({ color: 0xd8e4ff, transpare
 moonOrbMaterial.fog = false
 const moonOrb = new THREE.Mesh(new THREE.SphereGeometry(1.5, 22, 20), moonOrbMaterial)
 scene.add(moonOrb)
+
+const debugViewState = {
+  enemyHitboxOnly: false,
+  frozenSunPosition: sunLight.position.clone(),
+}
 
 const world = new THREE.Group()
 scene.add(world)
@@ -581,6 +594,14 @@ function resetDayNightToNight() {
   dayNightState.startedAtMs = nowMs
   dayNightState.dayFactor = 0
   flashlightState.lastUpdateMs = nowMs
+}
+
+function setEnemyHitboxOnlyDebugMode(enabled) {
+  debugViewState.enemyHitboxOnly = enabled
+  if (enabled) {
+    debugViewState.frozenSunPosition.copy(sunLight.position)
+  }
+  setEnemiesDebugRenderMode(enemies, enabled)
 }
 
 function syncControlTips() {
@@ -1595,8 +1616,7 @@ function updateColorTrialMechanics(delta) {
   }
 }
 
-function applyFixedDayEnvironment() {
-  const sunPosition = getFixedSunPosition()
+function applyForcedDayEnvironment(sunPosition) {
   dayNightState.dayFactor = 1
 
   scene.background.copy(CONSTANTS.SKY_DAY_COLOR)
@@ -1626,6 +1646,18 @@ function applyFixedDayEnvironment() {
 
   flashlight.intensity = 0
   flashlightFocus.intensity = 0
+}
+
+function applyFixedDayEnvironment() {
+  applyForcedDayEnvironment(getFixedSunPosition())
+}
+
+function applyDebugDayEnvironment() {
+  if (isFixedDayLevel()) {
+    applyFixedDayEnvironment()
+    return
+  }
+  applyForcedDayEnvironment(debugViewState.frozenSunPosition)
 }
 
 function spawnEnemyForCurrentLevel() {
@@ -1661,7 +1693,10 @@ function spawnEnemyForCurrentLevel() {
       )
     }
 
-    spawnEnemy(world, enemies, { spawnPosition })
+    const enemy = spawnEnemy(world, enemies, { spawnPosition })
+    if (enemy) {
+      setEnemyDebugRenderMode(enemy, debugViewState.enemyHitboxOnly)
+    }
     return
   }
 
@@ -1672,10 +1707,13 @@ function spawnEnemyForCurrentLevel() {
     colorProfile =
       COLOR_TRIAL_PROFILES[THREE.MathUtils.randInt(0, COLOR_TRIAL_PROFILES.length - 1)]
   }
-  spawnEnemy(world, enemies, {
+  const enemy = spawnEnemy(world, enemies, {
     spawnPosition: spawnData.position,
     colorProfile,
   })
+  if (enemy) {
+    setEnemyDebugRenderMode(enemy, debugViewState.enemyHitboxOnly)
+  }
 }
 
 const audioController = createAudioController({
@@ -2214,6 +2252,10 @@ window.addEventListener('keydown', (event) => {
     keys[event.code] = true
   }
 
+  if (event.code === 'KeyE' && !event.repeat) {
+    setEnemyHitboxOnlyDebugMode(!debugViewState.enemyHitboxOnly)
+  }
+
   if (event.code === 'KeyR') {
     resetRound()
     beginRound()
@@ -2318,12 +2360,16 @@ startBtn.addEventListener('click', beginRound)
 
 function animate() {
   const delta = Math.min(0.033, clock.getDelta())
-  updateDayNightCycle()
-  if (isSolarCycleLevel()) {
-    applySolarSunTint()
-  }
-  if (isFixedDayLevel()) {
-    applyFixedDayEnvironment()
+  if (debugViewState.enemyHitboxOnly) {
+    applyDebugDayEnvironment()
+  } else {
+    updateDayNightCycle()
+    if (isSolarCycleLevel()) {
+      applySolarSunTint()
+    }
+    if (isFixedDayLevel()) {
+      applyFixedDayEnvironment()
+    }
   }
   grassPeaceSystem.updatePeaceLighthouse()
   lavaPeaceSystem.updatePeaceLighthouse()
