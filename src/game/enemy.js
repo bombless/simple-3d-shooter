@@ -326,7 +326,7 @@ export function spawnEnemy(world, enemies, options = {}) {
     hitbox,
     corePulseSpeed: THREE.MathUtils.randFloat(2.0, 3.8),
     phase: Math.random() * Math.PI * 2,
-    spinSpeed: THREE.MathUtils.randFloat(1.45, 2.25),
+    spinSpeed: THREE.MathUtils.randFloat(0.55, 0.95),
     speed: THREE.MathUtils.randFloat(1.8, 2.9),
     damageCooldown: THREE.MathUtils.randFloat(0.2, 0.9),
     colorKey: colorProfile ? colorProfile.key : null,
@@ -334,6 +334,8 @@ export function spawnEnemy(world, enemies, options = {}) {
     slitherAmplitude: THREE.MathUtils.randFloat(0.13, 0.24),
     headBobAmplitude: THREE.MathUtils.randFloat(0.035, 0.075),
     headBobSpeed: THREE.MathUtils.randFloat(4.2, 6.8),
+    gaitSpeed: THREE.MathUtils.randFloat(3.8, 5.6),
+    gaitAmplitude: THREE.MathUtils.randFloat(0.26, 0.42),
   }
 
   enemies.push(enemy)
@@ -370,6 +372,7 @@ export function clearEnemies(world, enemies) {
 }
 
 const tempEnemyToPlayer = new THREE.Vector3()
+const tempEnemySide = new THREE.Vector3()
 
 export function updateEnemies(
   enemies,
@@ -388,13 +391,18 @@ export function updateEnemies(
     if (distance > 0.0001) {
       const targetYaw = Math.atan2(tempEnemyToPlayer.x, tempEnemyToPlayer.z)
       const yawError = normalizeAngle(targetYaw - enemy.mesh.rotation.y)
-      const maxTurnStep = enemy.spinSpeed * delta
+      const maxTurnStep = enemy.spinSpeed * delta * 0.7
       enemy.mesh.rotation.y += THREE.MathUtils.clamp(yawError, -maxTurnStep, maxTurnStep)
     }
 
     if (distance > 1.6) {
       tempEnemyToPlayer.normalize()
-      enemy.mesh.position.addScaledVector(tempEnemyToPlayer, enemy.speed * delta)
+      tempEnemySide.set(-tempEnemyToPlayer.z, 0, tempEnemyToPlayer.x)
+      const gaitWave = Math.sin(now * enemy.gaitSpeed + enemy.phase * 0.8)
+      const gaitVelocity = gaitWave * enemy.gaitAmplitude * enemy.speed
+      const forwardWeight = THREE.MathUtils.clamp((distance - 1.6) / 5, 0.32, 1)
+      enemy.mesh.position.addScaledVector(tempEnemyToPlayer, enemy.speed * delta * forwardWeight)
+      enemy.mesh.position.addScaledVector(tempEnemySide, gaitVelocity * delta)
     }
 
     const headBreath = 1 + Math.sin(now * enemy.corePulseSpeed + enemy.phase) * 0.05
