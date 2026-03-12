@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { ENEMY_BASE_HEIGHT } from './constants'
 import { normalizeAngle, randomSpawn } from './utils'
 
+const snakeTextureCache = new Map()
+
 function colorFromProfile(baseColor, options = {}) {
   const {
     whiteMix = 0,
@@ -27,152 +29,225 @@ function colorFromProfile(baseColor, options = {}) {
   return new THREE.Color().setHSL(hue, saturation, lightness)
 }
 
+function getSnakeTexture(baseColor, colorKey = 'default') {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  const key = `${colorKey}-${baseColor.getHexString()}`
+  if (snakeTextureCache.has(key)) {
+    return snakeTextureCache.get(key)
+  }
+
+  const size = 192
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    return null
+  }
+
+  const baseHex = `#${baseColor.getHexString()}`
+  const darkHex = `#${colorFromProfile(baseColor, { blackMix: 0.38 }).getHexString()}`
+  const midHex = `#${colorFromProfile(baseColor, { blackMix: 0.16 }).getHexString()}`
+  const lightHex = `#${colorFromProfile(baseColor, { whiteMix: 0.22 }).getHexString()}`
+
+  ctx.fillStyle = baseHex
+  ctx.fillRect(0, 0, size, size)
+
+  const scaleSize = 18
+  for (let row = 0; row < Math.ceil(size / scaleSize) + 1; row += 1) {
+    for (let col = 0; col < Math.ceil(size / scaleSize) + 1; col += 1) {
+      const offset = row % 2 === 0 ? 0 : scaleSize * 0.5
+      const x = col * scaleSize + offset
+      const y = row * scaleSize
+
+      ctx.beginPath()
+      ctx.moveTo(x, y + scaleSize * 0.12)
+      ctx.lineTo(x + scaleSize * 0.5, y + scaleSize * 0.86)
+      ctx.lineTo(x - scaleSize * 0.5, y + scaleSize * 0.86)
+      ctx.closePath()
+      ctx.fillStyle = row % 2 === 0 ? midHex : darkHex
+      ctx.globalAlpha = 0.42
+      ctx.fill()
+
+      ctx.beginPath()
+      ctx.arc(x, y + scaleSize * 0.56, scaleSize * 0.18, 0, Math.PI * 2)
+      ctx.fillStyle = lightHex
+      ctx.globalAlpha = 0.2
+      ctx.fill()
+    }
+  }
+  ctx.globalAlpha = 1
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.wrapS = THREE.RepeatWrapping
+  texture.wrapT = THREE.RepeatWrapping
+  texture.repeat.set(3.2, 1.8)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.needsUpdate = true
+  snakeTextureCache.set(key, texture)
+  return texture
+}
+
+function createSnakeMaterial({
+  baseEnemyColor,
+  baseEnemyEmissive,
+  colorKey,
+  hueSpread = 0.02,
+  whiteMix = 0,
+  blackMix = 0,
+  roughness = 0.72,
+}) {
+  const albedo = baseEnemyColor
+    ? colorFromProfile(baseEnemyColor, {
+        hueShift: THREE.MathUtils.randFloatSpread(hueSpread),
+        satShift: THREE.MathUtils.randFloat(-0.08, 0.08),
+        lightShift: THREE.MathUtils.randFloat(-0.08, 0.08),
+        whiteMix,
+        blackMix,
+      })
+    : new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.24, 0.38), 0.5, 0.33)
+  const emissive = baseEnemyEmissive
+    ? colorFromProfile(baseEnemyEmissive, {
+        blackMix: THREE.MathUtils.randFloat(0.18, 0.36),
+        hueShift: THREE.MathUtils.randFloatSpread(0.014),
+        satShift: THREE.MathUtils.randFloat(-0.06, 0.08),
+        lightShift: THREE.MathUtils.randFloat(-0.06, 0.06),
+      })
+    : new THREE.Color().setHSL(0.08, 0.72, 0.06)
+  const map = getSnakeTexture(albedo, colorKey || 'default')
+
+  return new THREE.MeshStandardMaterial({
+    color: map ? new THREE.Color(0xffffff) : albedo,
+    map,
+    emissive,
+    emissiveIntensity: 0.42,
+    roughness,
+    metalness: 0.04,
+  })
+}
+
 export function spawnEnemy(world, enemies, options = {}) {
   const { spawnPosition, colorProfile = null } = options
   const mesh = new THREE.Group()
   mesh.position.copy(spawnPosition || randomSpawn(ENEMY_BASE_HEIGHT))
-  const coreRadius = THREE.MathUtils.randFloat(0.75, 0.95)
+
   const baseEnemyColor = colorProfile ? new THREE.Color(colorProfile.enemyColor) : null
   const baseEnemyEmissive = colorProfile ? new THREE.Color(colorProfile.enemyEmissive) : null
 
-  const coreMaterial = new THREE.MeshStandardMaterial({
-    color: baseEnemyColor
-      ? colorFromProfile(baseEnemyColor, {
-          blackMix: THREE.MathUtils.randFloat(0.14, 0.32),
-          hueShift: THREE.MathUtils.randFloatSpread(0.015),
-          satShift: THREE.MathUtils.randFloat(-0.08, 0.1),
-          lightShift: THREE.MathUtils.randFloat(-0.08, 0.06),
-        })
-      : new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.96, 1.03), 0.52, 0.26),
-    emissive: baseEnemyEmissive
-      ? colorFromProfile(baseEnemyEmissive, {
-          blackMix: THREE.MathUtils.randFloat(0.15, 0.3),
-          hueShift: THREE.MathUtils.randFloatSpread(0.01),
-          satShift: THREE.MathUtils.randFloat(-0.06, 0.08),
-          lightShift: THREE.MathUtils.randFloat(-0.06, 0.06),
-        })
-      : new THREE.Color().setHSL(0.0, 0.75, 0.08),
-    roughness: 0.84,
-    metalness: 0.05,
+  const headRadius = THREE.MathUtils.randFloat(0.36, 0.46)
+  const bodySegmentCount = THREE.MathUtils.randInt(8, 12)
+  const segmentSpacing = THREE.MathUtils.randFloat(0.28, 0.36)
+  const bodyRearZ = -0.34 - (bodySegmentCount - 1) * segmentSpacing
+  const frontZ = headRadius * 1.18
+  const bodyLength = frontZ - bodyRearZ
+
+  const headMaterial = createSnakeMaterial({
+    baseEnemyColor,
+    baseEnemyEmissive,
+    colorKey: colorProfile ? colorProfile.key : 'default',
+    whiteMix: 0.08,
+    blackMix: 0.06,
+    roughness: 0.68,
   })
-  const core = new THREE.Mesh(new THREE.SphereGeometry(coreRadius, 26, 22), coreMaterial)
+  const bodyMaterial = createSnakeMaterial({
+    baseEnemyColor,
+    baseEnemyEmissive,
+    colorKey: colorProfile ? colorProfile.key : 'default',
+    blackMix: 0.12,
+    roughness: 0.75,
+  })
+
+  const core = new THREE.Mesh(new THREE.SphereGeometry(headRadius, 20, 16), headMaterial)
+  core.scale.set(1.18, 0.82, 1.42)
+  core.position.set(0, 0.06, 0.18)
   core.castShadow = true
   core.receiveShadow = true
   mesh.add(core)
 
-  const organs = []
-  const organCount = THREE.MathUtils.randInt(9, 15)
-  for (let i = 0; i < organCount; i += 1) {
-    const direction = new THREE.Vector3(
-      THREE.MathUtils.randFloatSpread(1),
-      THREE.MathUtils.randFloat(-0.35, 0.7),
-      THREE.MathUtils.randFloatSpread(1)
-    ).normalize()
-    const radius = THREE.MathUtils.randFloat(0.11, 0.26)
-    const organGeometry = new THREE.SphereGeometry(radius, 12, 10)
-    const organMaterial = new THREE.MeshStandardMaterial({
-      color: baseEnemyColor
-        ? colorFromProfile(baseEnemyColor, {
-            whiteMix: THREE.MathUtils.randFloat(0.04, 0.18),
-            hueShift: THREE.MathUtils.randFloatSpread(0.02),
-            satShift: THREE.MathUtils.randFloat(-0.05, 0.09),
-            lightShift: THREE.MathUtils.randFloat(0.02, 0.14),
-          })
-        : new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.97, 1.02), 0.67, 0.35),
-      emissive: baseEnemyEmissive
-        ? colorFromProfile(baseEnemyEmissive, {
-            blackMix: THREE.MathUtils.randFloat(0.08, 0.2),
-            hueShift: THREE.MathUtils.randFloatSpread(0.014),
-            satShift: THREE.MathUtils.randFloat(-0.04, 0.08),
-            lightShift: THREE.MathUtils.randFloat(-0.03, 0.08),
-          })
-        : new THREE.Color().setHSL(0.01, 0.85, 0.1),
-      roughness: 0.58,
-      metalness: 0.08,
+  const jaw = new THREE.Mesh(
+    new THREE.SphereGeometry(headRadius * 0.6, 16, 14),
+    new THREE.MeshStandardMaterial({
+      color: colorFromProfile(baseEnemyColor || new THREE.Color(0x7e9f4f), {
+        whiteMix: 0.14,
+        satShift: -0.12,
+        lightShift: 0.14,
+      }),
+      roughness: 0.7,
+      metalness: 0.02,
     })
-    const organ = new THREE.Mesh(organGeometry, organMaterial)
-    const baseScale = new THREE.Vector3(
-      THREE.MathUtils.randFloat(0.75, 1.28),
-      THREE.MathUtils.randFloat(0.9, 1.75),
-      THREE.MathUtils.randFloat(0.75, 1.28)
-    )
-    organ.scale.copy(baseScale)
-    organ.castShadow = true
-    organ.receiveShadow = true
+  )
+  jaw.scale.set(1.02, 0.48, 0.92)
+  jaw.position.set(0, -headRadius * 0.32, headRadius * 0.52)
+  jaw.castShadow = true
+  jaw.receiveShadow = true
+  core.add(jaw)
 
-    const baseOffset = coreRadius * THREE.MathUtils.randFloat(0.78, 1.06)
-    organ.position.copy(direction).multiplyScalar(baseOffset)
-    core.add(organ)
+  const organs = []
+  for (let i = 0; i < bodySegmentCount; i += 1) {
+    const progress = i / Math.max(1, bodySegmentCount - 1)
+    const radius = THREE.MathUtils.lerp(headRadius * 0.9, headRadius * 0.22, progress)
+    const segment = new THREE.Mesh(new THREE.SphereGeometry(radius, 14, 12), bodyMaterial)
+    const baseScale = new THREE.Vector3(
+      THREE.MathUtils.lerp(1.14, 0.92, progress),
+      THREE.MathUtils.lerp(0.8, 0.64, progress),
+      THREE.MathUtils.lerp(1.2, 0.78, progress)
+    )
+    const baseZ = -0.34 - i * segmentSpacing
+    segment.scale.copy(baseScale)
+    segment.position.set(0, 0, baseZ)
+    segment.castShadow = true
+    segment.receiveShadow = true
+    mesh.add(segment)
 
     organs.push({
-      mesh: organ,
-      direction,
-      baseOffset,
+      mesh: segment,
       baseScale,
-      pulseAmplitude: THREE.MathUtils.randFloat(0.04, 0.2),
-      pulseSpeed: THREE.MathUtils.randFloat(1.5, 4.4),
+      baseZ,
+      pulseAmplitude: THREE.MathUtils.randFloat(0.02, 0.06),
+      pulseSpeed: THREE.MathUtils.randFloat(2.1, 4.3),
       phase: Math.random() * Math.PI * 2,
+      waveOffset: progress * THREE.MathUtils.randFloat(2.2, 2.8),
+      lateralWeight: THREE.MathUtils.lerp(1.0, 0.28, progress),
+      verticalWeight: THREE.MathUtils.lerp(0.52, 0.18, progress),
     })
   }
 
   const eyes = []
-  const eyeCount = THREE.MathUtils.randInt(2, 4)
-  for (let i = 0; i < eyeCount; i += 1) {
-    const normal = new THREE.Vector3(
-      THREE.MathUtils.randFloatSpread(1),
-      THREE.MathUtils.randFloat(-0.08, 0.75),
-      THREE.MathUtils.randFloatSpread(1)
-    ).normalize()
-    const eyeRadius = THREE.MathUtils.randFloat(0.11, 0.18)
+  const eyeSpread = headRadius * 0.46
+  const eyeHeight = headRadius * 0.11
+  const eyeForward = headRadius * 0.62
+  for (const side of [-1, 1]) {
+    const eyeRadius = headRadius * THREE.MathUtils.randFloat(0.2, 0.24)
     const sclera = new THREE.Mesh(
-      new THREE.SphereGeometry(eyeRadius, 16, 14),
+      new THREE.SphereGeometry(eyeRadius, 14, 12),
       new THREE.MeshStandardMaterial({
-        color: baseEnemyColor
-          ? colorFromProfile(baseEnemyColor, {
-              whiteMix: THREE.MathUtils.randFloat(0.72, 0.84),
-              hueShift: THREE.MathUtils.randFloatSpread(0.01),
-              satShift: THREE.MathUtils.randFloat(-0.2, -0.08),
-              lightShift: THREE.MathUtils.randFloat(0.02, 0.08),
-            })
-          : new THREE.Color().setHSL(0.08, 0.18, THREE.MathUtils.randFloat(0.8, 0.92)),
-        emissive: baseEnemyEmissive
-          ? colorFromProfile(baseEnemyEmissive, {
-              blackMix: THREE.MathUtils.randFloat(0.35, 0.5),
-              hueShift: THREE.MathUtils.randFloatSpread(0.01),
-              satShift: THREE.MathUtils.randFloat(-0.1, 0.05),
-              lightShift: THREE.MathUtils.randFloat(-0.05, 0.04),
-            })
-          : new THREE.Color().setHSL(0.0, 0.28, 0.04),
-        roughness: 0.4,
+        color: colorFromProfile(baseEnemyColor || new THREE.Color(0xa8b87a), {
+          whiteMix: 0.52,
+          satShift: -0.2,
+          lightShift: 0.16,
+        }),
+        roughness: 0.42,
         metalness: 0.02,
       })
     )
+    sclera.position.set(side * eyeSpread, eyeHeight, eyeForward)
     sclera.castShadow = true
     sclera.receiveShadow = true
-    sclera.position.copy(normal).multiplyScalar(coreRadius * THREE.MathUtils.randFloat(0.78, 1.02))
     core.add(sclera)
 
     const pupil = new THREE.Mesh(
-      new THREE.SphereGeometry(eyeRadius * 0.43, 12, 10),
+      new THREE.SphereGeometry(eyeRadius * 0.5, 12, 10),
       new THREE.MeshStandardMaterial({
-        color: baseEnemyColor
-          ? colorFromProfile(baseEnemyColor, {
-              blackMix: THREE.MathUtils.randFloat(0.66, 0.8),
-              hueShift: THREE.MathUtils.randFloatSpread(0.01),
-              satShift: THREE.MathUtils.randFloat(-0.05, 0.05),
-              lightShift: THREE.MathUtils.randFloat(-0.08, 0.02),
-            })
-          : 0x050206,
-        emissive: baseEnemyEmissive
-          ? colorFromProfile(baseEnemyEmissive, {
-              blackMix: THREE.MathUtils.randFloat(0.42, 0.62),
-              hueShift: THREE.MathUtils.randFloatSpread(0.01),
-              satShift: THREE.MathUtils.randFloat(-0.04, 0.07),
-              lightShift: THREE.MathUtils.randFloat(-0.04, 0.04),
-            })
-          : 0x220018,
-        roughness: 0.25,
-        metalness: 0.05,
+        color: 0x090702,
+        emissive: colorFromProfile(baseEnemyEmissive || new THREE.Color(0x1d1407), {
+          blackMix: 0.36,
+        }),
+        emissiveIntensity: 0.36,
+        roughness: 0.24,
+        metalness: 0.03,
       })
     )
     pupil.position.set(0, 0, eyeRadius * 0.62)
@@ -182,85 +257,63 @@ export function spawnEnemy(world, enemies, options = {}) {
       sclera,
       pupil,
       pupilDepth: eyeRadius * 0.62,
-      pulseSpeed: THREE.MathUtils.randFloat(1.7, 4.6),
-      wanderAmplitude: THREE.MathUtils.randFloat(0.008, 0.035),
+      pulseSpeed: THREE.MathUtils.randFloat(2.2, 5.2),
+      wanderAmplitude: THREE.MathUtils.randFloat(0.01, 0.028),
       phase: Math.random() * Math.PI * 2,
     })
   }
 
-  const tentacles = []
-  const tentacleCount = THREE.MathUtils.randInt(3, 5)
-  for (let i = 0; i < tentacleCount; i += 1) {
-    const normal = new THREE.Vector3(
-      THREE.MathUtils.randFloatSpread(1),
-      THREE.MathUtils.randFloat(-0.66, 0.22),
-      THREE.MathUtils.randFloatSpread(1)
-    ).normalize()
-    const tangentA = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0))
-    if (tangentA.lengthSq() < 0.001) {
-      tangentA.crossVectors(normal, new THREE.Vector3(1, 0, 0))
-    }
-    tangentA.normalize()
-    const tangentB = new THREE.Vector3().crossVectors(normal, tangentA).normalize()
-
-    const segmentCount = THREE.MathUtils.randInt(3, 5)
-    const segments = []
-    for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
-      const radius = THREE.MathUtils.randFloat(0.09, 0.17) * (1 - segmentIndex * 0.14)
-      const segment = new THREE.Mesh(
-        new THREE.SphereGeometry(radius, 12, 10),
-        new THREE.MeshStandardMaterial({
-          color: baseEnemyColor
-            ? colorFromProfile(baseEnemyColor, {
-                blackMix: THREE.MathUtils.randFloat(0.28, 0.46),
-                hueShift: THREE.MathUtils.randFloatSpread(0.03),
-                satShift: THREE.MathUtils.randFloat(-0.08, 0.08),
-                lightShift: THREE.MathUtils.randFloat(-0.08, 0.04),
-              })
-            : new THREE.Color().setHSL(THREE.MathUtils.randFloat(0.28, 0.4), 0.45, 0.22),
-          emissive: baseEnemyEmissive
-            ? colorFromProfile(baseEnemyEmissive, {
-                blackMix: THREE.MathUtils.randFloat(0.24, 0.38),
-                hueShift: THREE.MathUtils.randFloatSpread(0.018),
-                satShift: THREE.MathUtils.randFloat(-0.06, 0.08),
-                lightShift: THREE.MathUtils.randFloat(-0.04, 0.06),
-              })
-            : new THREE.Color().setHSL(0.31, 0.6, 0.06),
-          roughness: 0.74,
-          metalness: 0.03,
-        })
-      )
-      const basePosition = normal
-        .clone()
-        .multiplyScalar(coreRadius * 0.62 + segmentIndex * THREE.MathUtils.randFloat(0.16, 0.22))
-        .addScaledVector(tangentA, (segmentIndex / segmentCount) * THREE.MathUtils.randFloat(-0.08, 0.08))
-      segment.position.copy(basePosition)
-      segment.castShadow = true
-      segment.receiveShadow = true
-      core.add(segment)
-
-      segments.push({
-        mesh: segment,
-        basePosition,
-        segmentIndex,
-      })
-    }
-
-    tentacles.push({
-      segments,
-      segmentCount,
-      tangentA,
-      tangentB,
-      swaySpeed: THREE.MathUtils.randFloat(1.6, 3.8),
-      swayAmplitude: THREE.MathUtils.randFloat(0.05, 0.13),
-      phase: Math.random() * Math.PI * 2,
+  const tongueMaterial = new THREE.MeshStandardMaterial({
+    color: colorFromProfile(baseEnemyColor || new THREE.Color(0xa35752), {
+      hueShift: 0.02,
+      satShift: 0.1,
+      lightShift: 0.08,
+    }),
+    emissive: colorFromProfile(baseEnemyEmissive || new THREE.Color(0x3a1d1d), {
+      whiteMix: 0.12,
+    }),
+    emissiveIntensity: 0.24,
+    roughness: 0.52,
+    metalness: 0.01,
+  })
+  const tongueSegments = []
+  const tongueSegmentCount = 3
+  for (let i = 0; i < tongueSegmentCount; i += 1) {
+    const radius = headRadius * THREE.MathUtils.lerp(0.13, 0.07, i / (tongueSegmentCount - 1))
+    const segment = new THREE.Mesh(new THREE.SphereGeometry(radius, 10, 8), tongueMaterial)
+    const basePosition = new THREE.Vector3(
+      0,
+      -headRadius * 0.15,
+      headRadius * 0.84 + i * headRadius * 0.25
+    )
+    segment.position.copy(basePosition)
+    segment.castShadow = true
+    segment.receiveShadow = true
+    core.add(segment)
+    tongueSegments.push({
+      mesh: segment,
+      basePosition,
+      segmentIndex: i,
     })
   }
+
+  const tentacles = [
+    {
+      segments: tongueSegments,
+      segmentCount: tongueSegments.length,
+      tangentA: new THREE.Vector3(1, 0, 0),
+      tangentB: new THREE.Vector3(0, 1, 0),
+      swaySpeed: THREE.MathUtils.randFloat(9.2, 12.4),
+      swayAmplitude: THREE.MathUtils.randFloat(0.04, 0.08),
+      phase: Math.random() * Math.PI * 2,
+    },
+  ]
 
   const hitbox = new THREE.Mesh(
-    new THREE.SphereGeometry(coreRadius + 0.74, 14, 12),
+    new THREE.BoxGeometry(headRadius * 2.5, headRadius * 1.9, bodyLength + 0.55),
     new THREE.MeshBasicMaterial({ visible: false })
   )
+  hitbox.position.z = (frontZ + bodyRearZ) * 0.5
   hitbox.userData.enemyMesh = mesh
   mesh.add(hitbox)
 
@@ -271,12 +324,16 @@ export function spawnEnemy(world, enemies, options = {}) {
     eyes,
     tentacles,
     hitbox,
-    corePulseSpeed: THREE.MathUtils.randFloat(2.4, 4.2),
+    corePulseSpeed: THREE.MathUtils.randFloat(2.0, 3.8),
     phase: Math.random() * Math.PI * 2,
-    spinSpeed: THREE.MathUtils.randFloat(1.25, 2.05),
-    speed: THREE.MathUtils.randFloat(1.7, 2.8),
+    spinSpeed: THREE.MathUtils.randFloat(1.45, 2.25),
+    speed: THREE.MathUtils.randFloat(1.8, 2.9),
     damageCooldown: THREE.MathUtils.randFloat(0.2, 0.9),
     colorKey: colorProfile ? colorProfile.key : null,
+    slitherSpeed: THREE.MathUtils.randFloat(4.4, 6.6),
+    slitherAmplitude: THREE.MathUtils.randFloat(0.13, 0.24),
+    headBobAmplitude: THREE.MathUtils.randFloat(0.035, 0.075),
+    headBobSpeed: THREE.MathUtils.randFloat(4.2, 6.8),
   }
 
   enemies.push(enemy)
@@ -312,10 +369,7 @@ export function clearEnemies(world, enemies) {
   }
 }
 
-const tempEnemyEyePosition = new THREE.Vector3()
-const tempEnemyEyeForward = new THREE.Vector3()
-const tempEnemyEyeToCamera = new THREE.Vector3()
-const tempEnemyEyeQuaternion = new THREE.Quaternion()
+const tempEnemyToPlayer = new THREE.Vector3()
 
 export function updateEnemies(
   enemies,
@@ -328,82 +382,78 @@ export function updateEnemies(
   const now = performance.now() * 0.001
 
   for (const enemy of enemies) {
-    const toPlayer = new THREE.Vector3().subVectors(state.playerPosition, enemy.mesh.position)
-    const distance = toPlayer.length()
+    tempEnemyToPlayer.subVectors(state.playerPosition, enemy.mesh.position)
+    const distance = tempEnemyToPlayer.length()
 
-    if (distance > 1.6) {
-      toPlayer.normalize()
-      enemy.mesh.position.addScaledVector(toPlayer, enemy.speed * delta)
-    }
-
-    let eyesNeedTurn = false
-    for (const eye of enemy.eyes) {
-      eye.sclera.getWorldPosition(tempEnemyEyePosition)
-      eye.sclera.getWorldQuaternion(tempEnemyEyeQuaternion)
-      tempEnemyEyeForward.set(0, 0, 1).applyQuaternion(tempEnemyEyeQuaternion)
-      tempEnemyEyeToCamera.subVectors(camera.position, tempEnemyEyePosition).normalize()
-      const eyeAlignment = tempEnemyEyeForward.dot(tempEnemyEyeToCamera)
-      if (eyeAlignment < 0.985) {
-        eyesNeedTurn = true
-        break
-      }
-    }
-
-    if (eyesNeedTurn) {
-      const targetYaw = Math.atan2(
-        camera.position.x - enemy.mesh.position.x,
-        camera.position.z - enemy.mesh.position.z
-      )
+    if (distance > 0.0001) {
+      const targetYaw = Math.atan2(tempEnemyToPlayer.x, tempEnemyToPlayer.z)
       const yawError = normalizeAngle(targetYaw - enemy.mesh.rotation.y)
-      const maxTurnStep = enemy.spinSpeed * delta * 0.95
+      const maxTurnStep = enemy.spinSpeed * delta
       enemy.mesh.rotation.y += THREE.MathUtils.clamp(yawError, -maxTurnStep, maxTurnStep)
     }
 
-    const coreBreath = 1 + Math.sin(now * enemy.corePulseSpeed + enemy.phase) * 0.08
-    enemy.core.scale.setScalar(coreBreath)
+    if (distance > 1.6) {
+      tempEnemyToPlayer.normalize()
+      enemy.mesh.position.addScaledVector(tempEnemyToPlayer, enemy.speed * delta)
+    }
+
+    const headBreath = 1 + Math.sin(now * enemy.corePulseSpeed + enemy.phase) * 0.05
+    const jawPulse = 1 + Math.sin(now * (enemy.corePulseSpeed * 1.2) + enemy.phase * 1.1) * 0.04
+    enemy.core.scale.set(1.18 * headBreath, 0.82 * jawPulse, 1.42 * headBreath)
+    enemy.core.position.y = 0.06 + Math.sin(now * enemy.headBobSpeed + enemy.phase) * enemy.headBobAmplitude
+    enemy.core.rotation.x = Math.sin(now * (enemy.headBobSpeed * 0.52) + enemy.phase) * 0.08
+    enemy.core.rotation.y = Math.sin(now * (enemy.slitherSpeed * 0.46) + enemy.phase) * 0.12
+
     for (const organ of enemy.organs) {
+      const wave = Math.sin(now * enemy.slitherSpeed + enemy.phase - organ.waveOffset)
+      const waveLift = Math.cos(
+        now * (enemy.slitherSpeed * 0.66) + enemy.phase * 0.7 - organ.waveOffset * 0.92
+      )
       const surge = Math.sin(now * organ.pulseSpeed + organ.phase) * organ.pulseAmplitude
-      const stretch = 1 + Math.sin(now * (organ.pulseSpeed * 1.3) + organ.phase) * 0.22
-      organ.mesh.position.copy(organ.direction).multiplyScalar(organ.baseOffset + surge)
+      const stretch = 1 + surge * 0.9
+      organ.mesh.position.x = wave * enemy.slitherAmplitude * organ.lateralWeight
+      organ.mesh.position.y = waveLift * enemy.slitherAmplitude * 0.22 * organ.verticalWeight
+      organ.mesh.position.z = organ.baseZ
+      organ.mesh.rotation.y = wave * 0.22
       organ.mesh.scale.set(
         organ.baseScale.x * stretch,
-        organ.baseScale.y * (1 + surge * 0.9),
+        organ.baseScale.y * (1 + surge * 0.35),
         organ.baseScale.z * stretch
       )
     }
 
     for (const eye of enemy.eyes) {
       eye.sclera.lookAt(camera.position)
-      const dilation = 0.86 + Math.sin(now * eye.pulseSpeed + eye.phase) * 0.22
-      const wanderX = Math.sin(now * (eye.pulseSpeed * 1.9) + eye.phase) * eye.wanderAmplitude
-      const wanderY =
-        Math.cos(now * (eye.pulseSpeed * 1.4) + eye.phase * 0.7) * eye.wanderAmplitude * 0.72
+      const dilation = 0.88 + Math.sin(now * eye.pulseSpeed + eye.phase) * 0.18
+      const wanderX = Math.sin(now * (eye.pulseSpeed * 1.7) + eye.phase) * eye.wanderAmplitude
+      const wanderY = Math.cos(now * (eye.pulseSpeed * 1.3) + eye.phase) * eye.wanderAmplitude * 0.58
       eye.pupil.position.set(wanderX, wanderY, eye.pupilDepth)
-      eye.pupil.scale.set(dilation, dilation * 0.82, dilation)
+      eye.pupil.scale.set(dilation, dilation * 0.78, dilation)
     }
 
     for (const tentacle of enemy.tentacles) {
       for (const segment of tentacle.segments) {
         const progress = (segment.segmentIndex + 1) / tentacle.segmentCount
         const wave =
-          Math.sin(
-            now * tentacle.swaySpeed + tentacle.phase + segment.segmentIndex * 0.58
-          ) *
+          Math.sin(now * tentacle.swaySpeed + tentacle.phase + segment.segmentIndex * 0.62) *
           tentacle.swayAmplitude *
           progress
-        const twist =
-          Math.cos(
-            now * (tentacle.swaySpeed * 1.24) + tentacle.phase * 0.7 + segment.segmentIndex * 0.36
+        const lift =
+          Math.max(
+            0,
+            Math.cos(
+              now * (tentacle.swaySpeed * 1.46) +
+                tentacle.phase * 0.7 +
+                segment.segmentIndex * 0.44
+            )
           ) *
           tentacle.swayAmplitude *
-          0.65 *
+          0.9 *
           progress
-        const pulse = 1 + Math.sin(now * (tentacle.swaySpeed * 1.34) + tentacle.phase + segment.segmentIndex * 0.7) * 0.1
         segment.mesh.position
           .copy(segment.basePosition)
           .addScaledVector(tentacle.tangentA, wave)
-          .addScaledVector(tentacle.tangentB, twist)
-        segment.mesh.scale.setScalar(pulse)
+          .addScaledVector(tentacle.tangentB, lift)
       }
     }
 
