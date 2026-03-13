@@ -130,6 +130,10 @@ const isAndroidNativeApp = (() => {
 const enemySpawnIntervalSeconds = mobileControls.enabled
   ? CONSTANTS.ENEMY_SPAWN_INTERVAL_MOBILE_SECONDS
   : CONSTANTS.ENEMY_SPAWN_INTERVAL_DESKTOP_SECONDS
+const ENEMY_SPAWN_COUNT_SCALE = 1 / 3
+const scaledEnemySpawnIntervalSeconds = enemySpawnIntervalSeconds / ENEMY_SPAWN_COUNT_SCALE
+const scaledEnemyBaseCap = Math.max(1, Math.round(CONSTANTS.ENEMY_MAX_ACTIVE_COUNT * ENEMY_SPAWN_COUNT_SCALE))
+const INITIAL_ENEMY_SPAWN_COUNT = Math.max(1, Math.round(6 * ENEMY_SPAWN_COUNT_SCALE))
 
 const dayNightState = {
   startedAtMs: performance.now(),
@@ -1823,7 +1827,7 @@ function resetRound() {
   state.lastTrailPosition.copy(state.playerPosition)
   orientPlayerViewForSpawn()
 
-  for (let i = 0; i < 6; i += 1) {
+  for (let i = 0; i < INITIAL_ENEMY_SPAWN_COUNT; i += 1) {
     spawnEnemyForCurrentLevel()
   }
 
@@ -2040,11 +2044,12 @@ function updateRoundState(delta) {
   }
 
   const spawnIntervalSeconds = isSolarCycleLevel()
-    ? enemySpawnIntervalSeconds * solarCycleState.enemySpawnScale
-    : enemySpawnIntervalSeconds
+    ? scaledEnemySpawnIntervalSeconds * solarCycleState.enemySpawnScale
+    : scaledEnemySpawnIntervalSeconds
+  const scaledSolarEnemyCapBonus = Math.round(solarCycleState.enemyCapBonus * ENEMY_SPAWN_COUNT_SCALE)
   const enemyCap = isSolarCycleLevel()
-    ? CONSTANTS.ENEMY_MAX_ACTIVE_COUNT + solarCycleState.enemyCapBonus
-    : CONSTANTS.ENEMY_MAX_ACTIVE_COUNT
+    ? scaledEnemyBaseCap + scaledSolarEnemyCapBonus
+    : scaledEnemyBaseCap
 
   state.spawnAccumulator += delta
   if (state.spawnAccumulator >= spawnIntervalSeconds && enemies.length < enemyCap) {
