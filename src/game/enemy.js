@@ -18,6 +18,8 @@ const tempExternalHitboxLocalBox = new THREE.Box3()
 const tempExternalHitboxSize = new THREE.Vector3()
 const tempExternalHitboxCenter = new THREE.Vector3()
 const tempExternalHitboxInverseMeshMatrix = new THREE.Matrix4()
+const tempExternalLowPointVertex = new THREE.Vector3()
+const EXTERNAL_LOW_POINT_MAX_VERTICES_PER_MESH = 9000
 let externalHitboxFrameCounter = 0
 
 function colorFromProfile(baseColor, options = {}) {
@@ -218,13 +220,80 @@ function ensureCobraTemplateLoaded() {
 
 ensureCobraTemplateLoaded()
 
-function syncExternalEnemyHitbox(enemy) {
+function computeExternalCoreWorldBounds(enemy, outBox = tempExternalHitboxWorldBox) {
   enemy.core.updateMatrixWorld(true)
-  tempExternalHitboxWorldBox.setFromObject(enemy.core)
-  if (!Number.isFinite(tempExternalHitboxWorldBox.min.x)) {
-    return
+  outBox.setFromObject(enemy.core)
+  return Number.isFinite(outBox.min.x)
+}
+
+function collectExternalLowPointSources(core) {
+  const sources = []
+  core.traverse((node) => {
+    if (!node.isMesh || !node.geometry) {
+      return
+    }
+    const positionAttr = node.geometry.attributes?.position
+    if (!positionAttr || positionAttr.count <= 0) {
+      return
+    }
+    const stride = Math.max(1, Math.floor(positionAttr.count / EXTERNAL_LOW_POINT_MAX_VERTICES_PER_MESH))
+    sources.push({
+      node,
+      positionAttr,
+      stride,
+    })
+  })
+  return sources
+}
+
+function computeExternalVisualLowPointY(enemy) {
+  const sources = enemy.lowPointSources
+  if (!sources || sources.length === 0) {
+    return null
   }
 
+  let minY = Number.POSITIVE_INFINITY
+  for (const source of sources) {
+    const { node, positionAttr, stride } = source
+    for (let i = 0; i < positionAttr.count; i += stride) {
+      tempExternalLowPointVertex.fromBufferAttribute(positionAttr, i)
+      if (node.isSkinnedMesh && typeof node.applyBoneTransform === 'function') {
+        node.applyBoneTransform(i, tempExternalLowPointVertex)
+      }
+      tempExternalLowPointVertex.applyMatrix4(node.matrixWorld)
+      if (tempExternalLowPointVertex.y < minY) {
+        minY = tempExternalLowPointVertex.y
+      }
+    }
+  }
+
+  return Number.isFinite(minY) ? minY : null
+}
+
+function alignExternalModelLowPointToGround(enemy) {
+  enemy.core.updateMatrixWorld(true)
+  const visualLowPointY = computeExternalVisualLowPointY(enemy)
+  const fallbackLowPointY =
+    visualLowPointY === null && computeExternalCoreWorldBounds(enemy, tempExternalHitboxWorldBox)
+      ? tempExternalHitboxWorldBox.min.y
+      : null
+  const lowPointY = visualLowPointY ?? fallbackLowPointY
+  if (lowPointY === null) {
+    return false
+  }
+
+  const correction = enemy.mesh.position.y - lowPointY
+  if (Math.abs(correction) > 0.0001) {
+    enemy.core.position.y += correction
+    enemy.core.updateMatrixWorld(true)
+  }
+  return computeExternalCoreWorldBounds(enemy, tempExternalHitboxWorldBox)
+}
+
+function syncExternalEnemyHitbox(enemy) {
+  if (!computeExternalCoreWorldBounds(enemy, tempExternalHitboxWorldBox)) {
+    return
+  }
   tempExternalHitboxInverseMeshMatrix.copy(enemy.mesh.matrixWorld).invert()
   tempExternalHitboxLocalBox
     .copy(tempExternalHitboxWorldBox)
@@ -259,7 +328,6 @@ function trySpawnCobraEnemy(world, enemies, spawnPosition, colorProfile) {
     core.rotation.y = Math.PI * 0.5
     modelBaseYaw = Math.PI * 0.5
   }
-  modelBaseYaw += Math.PI
   core.rotation.y = modelBaseYaw
 
   tempCobraBox.setFromObject(core)
@@ -323,8 +391,10 @@ function trySpawnCobraEnemy(world, enemies, spawnPosition, colorProfile) {
     animationSpeed: THREE.MathUtils.randFloat(0.85, 1.15),
     useExternalModel: true,
     hitboxSyncOffset: THREE.MathUtils.randInt(0, 2),
+    lowPointSources: collectExternalLowPointSources(core),
   }
 
+  alignExternalModelLowPointToGround(enemy)
   syncExternalEnemyHitbox(enemy)
   enemies.push(enemy)
   world.add(mesh)
@@ -718,6 +788,7 @@ export function updateEnemies(
       enemy.core.rotation.x = Math.sin(now * (enemy.headBobSpeed * 0.42) + enemy.phase) * 0.05
       enemy.core.rotation.y =
         enemy.coreBaseYaw + Math.sin(now * (enemy.slitherSpeed * 0.36) + enemy.phase) * 0.06
+      alignExternalModelLowPointToGround(enemy)
       const hitboxSyncStride = distance < 6 ? 2 : 3
       if ((externalHitboxFrameCounter + enemy.hitboxSyncOffset) % hitboxSyncStride === 0) {
         syncExternalEnemyHitbox(enemy)

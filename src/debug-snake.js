@@ -1,3 +1,7 @@
+console.log('========================================')
+console.log('DEBUG-SNAKE.JS LOADED - TIMESTAMP:', new Date().toISOString())
+console.log('========================================')
+
 import './debug-snake.css'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
@@ -20,6 +24,8 @@ app.innerHTML = `
         <label class="toggle"><input id="toggle-current" type="checkbox" checked />Current Box</label>
         <label class="toggle"><input id="toggle-compare" type="checkbox" checked />Compare Box</label>
         <label class="toggle"><input id="toggle-grid" type="checkbox" checked />Ground Grid</label>
+        <label class="toggle"><input id="toggle-bottom-samples" type="checkbox" checked />Bottom Samples</label>
+        <label class="toggle"><input id="toggle-align-ground" type="checkbox" checked />Align Low Point</label>
         <label class="toggle"><input id="toggle-axes" type="checkbox" />Axes</label>
         <label class="toggle"><input id="toggle-autorotate" type="checkbox" />Auto Rotate</label>
       </div>
@@ -48,6 +54,12 @@ app.innerHTML = `
         <span id="target-length-value" class="value">18.0</span>
       </div>
 
+      <div class="row wrap">
+        <label for="sample-diameter">Sample Diameter</label>
+        <input id="sample-diameter" type="range" min="0.05" max="1.8" step="0.01" value="0.34" />
+        <span id="sample-diameter-value" class="value">0.34</span>
+      </div>
+
       <div class="row">
         <label for="sync-stride">Hitbox Sync Stride</label>
         <select id="sync-stride">
@@ -62,6 +74,8 @@ app.innerHTML = `
         <pre id="metrics-output">Waiting for model...</pre>
       </div>
 
+      <div id="sample-count-banner">Candidates: 0 | Displayed: 0/30</div>
+
       <div id="legend">
         <span class="c current"></span>Current (red)
         <span style="display:inline-block;width:12px"></span>
@@ -74,12 +88,15 @@ app.innerHTML = `
 const viewportEl = document.querySelector('#viewport')
 const statusEl = document.querySelector('#status')
 const metricsEl = document.querySelector('#metrics-output')
+const sampleCountBannerEl = document.querySelector('#sample-count-banner')
 
 const controlsEl = {
   toggleModel: document.querySelector('#toggle-model'),
   toggleCurrent: document.querySelector('#toggle-current'),
   toggleCompare: document.querySelector('#toggle-compare'),
   toggleGrid: document.querySelector('#toggle-grid'),
+  toggleBottomSamples: document.querySelector('#toggle-bottom-samples'),
+  toggleAlignGround: document.querySelector('#toggle-align-ground'),
   toggleAxes: document.querySelector('#toggle-axes'),
   toggleAutoRotate: document.querySelector('#toggle-autorotate'),
   animPlay: document.querySelector('#anim-play'),
@@ -90,6 +107,8 @@ const controlsEl = {
   modelYawValue: document.querySelector('#model-yaw-value'),
   targetLength: document.querySelector('#target-length'),
   targetLengthValue: document.querySelector('#target-length-value'),
+  sampleDiameter: document.querySelector('#sample-diameter'),
+  sampleDiameterValue: document.querySelector('#sample-diameter-value'),
   syncStride: document.querySelector('#sync-stride'),
 }
 
@@ -166,6 +185,47 @@ const compareHitboxMesh = new THREE.Mesh(
 )
 scene.add(compareHitboxMesh)
 
+const BOTTOM_SAMPLE_COUNT = 30
+const BOTTOM_SAMPLE_BAND_RATIO = 0.3
+const BOTTOM_SAMPLE_MAX_VERTICES_PER_MESH = 9000
+const bottomSampleGeometry = new THREE.SphereGeometry(0.5, 16, 16)
+const bottomSampleCoreMaterial = new THREE.MeshBasicMaterial({
+  color: 0xf7ff99,
+  transparent: true,
+  opacity: 1,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  depthTest: false,
+  toneMapped: false,
+})
+const bottomSampleGlowMaterial = new THREE.MeshBasicMaterial({
+  color: 0x40d9ff,
+  transparent: true,
+  opacity: 0.42,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  depthTest: false,
+  toneMapped: false,
+})
+const bottomSampleGroup = new THREE.Group()
+scene.add(bottomSampleGroup)
+const bottomSampleSpheres = []
+for (let i = 0; i < BOTTOM_SAMPLE_COUNT; i += 1) {
+  const sphere = new THREE.Group()
+  const glowMesh = new THREE.Mesh(bottomSampleGeometry, bottomSampleGlowMaterial)
+  glowMesh.scale.setScalar(2.2)
+  glowMesh.renderOrder = 900
+  sphere.add(glowMesh)
+
+  const coreMesh = new THREE.Mesh(bottomSampleGeometry, bottomSampleCoreMaterial)
+  coreMesh.renderOrder = 901
+  sphere.add(coreMesh)
+
+  sphere.visible = false
+  bottomSampleGroup.add(sphere)
+  bottomSampleSpheres.push(sphere)
+}
+
 const loader = new GLTFLoader()
 const clock = new THREE.Clock()
 
@@ -178,6 +238,9 @@ const tempSize = new THREE.Vector3()
 const tempCenter = new THREE.Vector3()
 const tempSize2 = new THREE.Vector3()
 const tempCenter2 = new THREE.Vector3()
+const tempVertex = new THREE.Vector3()
+const tempBottomBandMin = new THREE.Vector3()
+const tempBottomBandMax = new THREE.Vector3()
 
 let core = null
 let mixer = null
@@ -199,12 +262,19 @@ const state = {
   showCurrent: true,
   showCompare: true,
   showGrid: true,
+  showBottomSamples: true,
+  alignLowPointToGround: true,
   showAxes: false,
   autoRotate: false,
   phase: Math.PI * 0.32,
   headBobAmplitude: 0.048,
   headBobSpeed: 4.6,
   slitherSpeed: 5.2,
+  sampleDiameter: 0.34,
+  visualLowPointY: 0,
+  lastGroundCorrection: 0,
+  bottomCandidateCount: 0,
+  bottomDisplayedCount: 0,
 }
 
 function orbitDefault() {
@@ -255,6 +325,7 @@ function computeAnimatedWorldBounds(root, outBox) {
 function updateMetricsDisplay() {
   if (!loaded) {
     metricsEl.textContent = 'Waiting for model...'
+    sampleCountBannerEl.textContent = 'Candidates: -- | Displayed: --/30'
     return
   }
 
@@ -276,9 +347,104 @@ function updateMetricsDisplay() {
     `Compare world size : ${formatVec(tempSize2)}`,
     `Compare world center: ${formatVec(tempCenter2)}`,
     `Volume ratio (Current/Compare): ${ratio.toFixed(3)}`,
+    `Visual low point y: ${state.visualLowPointY.toFixed(3)}`,
+    `Ground correction/frame: ${state.lastGroundCorrection.toFixed(3)}`,
+    `Bottom 30% candidates: ${state.bottomCandidateCount}`,
+    `Bottom samples shown: ${state.bottomDisplayedCount}/${BOTTOM_SAMPLE_COUNT}`,
+    `Bottom sample diameter: ${state.sampleDiameter.toFixed(2)}`,
     `Model base yaw: ${THREE.MathUtils.radToDeg(modelBaseYaw).toFixed(1)} deg`,
     `Sync stride: every ${state.syncStride} frame(s)`,
   ].join('\n')
+
+  sampleCountBannerEl.textContent = `Candidates: ${state.bottomCandidateCount} | Displayed: ${state.bottomDisplayedCount}/${BOTTOM_SAMPLE_COUNT}`
+}
+
+function hideBottomSamples() {
+  for (const sphere of bottomSampleSpheres) {
+    sphere.visible = false
+  }
+}
+
+function applyBottomSampleDiameter() {
+  for (const sphere of bottomSampleSpheres) {
+    sphere.scale.setScalar(state.sampleDiameter)
+  }
+}
+
+function updateBottomBandSamplesFromModel() {
+  console.log('=== updateBottomBandSamplesFromModel called ===')
+  console.log('core exists:', !!core, 'showBottomSamples:', state.showBottomSamples)
+
+  if (!core || !state.showBottomSamples) {
+    state.bottomCandidateCount = 0
+    state.bottomDisplayedCount = 0
+    hideBottomSamples()
+    console.log('Bottom samples: hidden (core or showBottomSamples false)')
+    return
+  }
+
+  core.updateMatrixWorld(true)
+
+  // Collect ALL vertices with their Y positions
+  const allVertices = []
+  core.traverse((node) => {
+    if (!node.isMesh || !node.geometry) {
+      return
+    }
+
+    const positionAttr = node.geometry.attributes?.position
+    if (!positionAttr || positionAttr.count <= 0) {
+      return
+    }
+
+    const stride = Math.max(1, Math.floor(positionAttr.count / BOTTOM_SAMPLE_MAX_VERTICES_PER_MESH))
+    for (let i = 0; i < positionAttr.count; i += stride) {
+      tempVertex.fromBufferAttribute(positionAttr, i)
+      if (node.isSkinnedMesh && typeof node.applyBoneTransform === 'function') {
+        node.applyBoneTransform(i, tempVertex)
+      }
+      tempVertex.applyMatrix4(node.matrixWorld)
+      allVertices.push(tempVertex.clone())
+    }
+  })
+
+  state.bottomCandidateCount = allVertices.length
+  console.log('Total vertices sampled:', allVertices.length)
+
+  if (allVertices.length === 0) {
+    state.bottomDisplayedCount = 0
+    hideBottomSamples()
+    return
+  }
+
+  // Sort by Y position (lowest first)
+  allVertices.sort((a, b) => a.y - b.y)
+
+  // Take the lowest 30 points
+  const lowestPoints = allVertices.slice(0, BOTTOM_SAMPLE_COUNT)
+  state.bottomDisplayedCount = lowestPoints.length
+
+  console.log('Lowest point Y:', lowestPoints[0].y.toFixed(3))
+  console.log('30th lowest point Y:', lowestPoints[lowestPoints.length - 1].y.toFixed(3))
+
+  // Display the lowest points as spheres
+  for (let i = 0; i < BOTTOM_SAMPLE_COUNT; i += 1) {
+    const sphere = bottomSampleSpheres[i]
+    if (i < lowestPoints.length) {
+      sphere.position.copy(lowestPoints[i])
+      sphere.visible = true
+      if (i === 0) {
+        console.log('Lowest sphere position:', formatVec(sphere.position), 'scale:', sphere.scale.x)
+      }
+    } else {
+      sphere.visible = false
+    }
+  }
+
+  console.log('Displaying', lowestPoints.length, 'lowest points')
+
+  // Return the lowest Y value for ground alignment
+  return lowestPoints[0].y
 }
 
 function applyVisibility() {
@@ -289,49 +455,87 @@ function applyVisibility() {
   compareHitboxMesh.visible = state.showCompare
   gridHelper.visible = state.showGrid
   groundPlane.visible = state.showGrid
+  bottomSampleGroup.visible = state.showBottomSamples
   axesHelper.visible = state.showAxes
   orbitControls.autoRotate = state.autoRotate
+  if (!state.showBottomSamples) {
+    hideBottomSamples()
+    state.bottomCandidateCount = 0
+    state.bottomDisplayedCount = 0
+  }
   updateMetricsDisplay()
 }
 
 function syncHitboxes(force = false) {
+  console.log('>>> syncHitboxes called, force:', force, 'core:', !!core, 'frameCounter:', frameCounter)
+
   if (!core) {
+    console.log('>>> syncHitboxes: no core, returning')
     return
   }
 
   frameCounter += 1
-  if (!force && frameCounter % state.syncStride !== 0) {
+  const shouldSync = force || (frameCounter % state.syncStride === 0)
+  console.log('>>> shouldSync:', shouldSync, 'syncStride:', state.syncStride)
+
+  if (shouldSync) {
+    core.updateMatrixWorld(true)
+    computeAnimatedWorldBounds(core, tempWorldBox)
+    if (!Number.isFinite(tempWorldBox.min.x)) {
+      console.log('>>> syncHitboxes: invalid bounds')
+      return
+    }
+
+    tempInvMatrix.copy(enemyRoot.matrixWorld).invert()
+    tempLocalBox.copy(tempWorldBox).applyMatrix4(tempInvMatrix)
+    tempLocalBox.getSize(tempSize)
+    tempLocalBox.getCenter(tempCenter)
+
+    currentHitboxMesh.scale.set(
+      Math.max(1.2, tempSize.x * 1.02),
+      Math.max(1.0, tempSize.y * 1.06),
+      Math.max(2.2, tempSize.z * 1.04)
+    )
+    currentHitboxMesh.position.copy(tempCenter)
+
+    tempWorldBox.getSize(tempSize2)
+    tempWorldBox.getCenter(tempCenter2)
+    compareHitboxMesh.scale.set(
+      Math.max(0.001, tempSize2.x),
+      Math.max(0.001, tempSize2.y),
+      Math.max(0.001, tempSize2.z)
+    )
+    compareHitboxMesh.position.copy(tempCenter2)
+
+    updateMetricsDisplay()
+  }
+}
+
+function alignVisualLowPointToGround() {
+  if (!core) {
     return
   }
 
-  core.updateMatrixWorld(true)
-  computeAnimatedWorldBounds(core, tempWorldBox)
-  if (!Number.isFinite(tempWorldBox.min.x)) {
+  // Get the lowest point from the bottom samples
+  const lowestY = updateBottomBandSamplesFromModel()
+
+  if (lowestY === undefined || !Number.isFinite(lowestY)) {
+    state.visualLowPointY = 0
+    state.lastGroundCorrection = 0
     return
   }
 
-  tempInvMatrix.copy(enemyRoot.matrixWorld).invert()
-  tempLocalBox.copy(tempWorldBox).applyMatrix4(tempInvMatrix)
-  tempLocalBox.getSize(tempSize)
-  tempLocalBox.getCenter(tempCenter)
+  state.visualLowPointY = lowestY
+  if (!state.alignLowPointToGround) {
+    state.lastGroundCorrection = 0
+    return
+  }
 
-  currentHitboxMesh.scale.set(
-    Math.max(1.2, tempSize.x * 1.02),
-    Math.max(1.0, tempSize.y * 1.06),
-    Math.max(2.2, tempSize.z * 1.04)
-  )
-  currentHitboxMesh.position.copy(tempCenter)
-
-  tempWorldBox.getSize(tempSize2)
-  tempWorldBox.getCenter(tempCenter2)
-  compareHitboxMesh.scale.set(
-    Math.max(0.001, tempSize2.x),
-    Math.max(0.001, tempSize2.y),
-    Math.max(0.001, tempSize2.z)
-  )
-  compareHitboxMesh.position.copy(tempCenter2)
-
-  updateMetricsDisplay()
+  const correction = -lowestY
+  state.lastGroundCorrection = correction
+  if (Math.abs(correction) > 0.0001) {
+    core.position.y += correction
+  }
 }
 
 function applyModelCalibration() {
@@ -367,6 +571,7 @@ function updateControlsText() {
   controlsEl.animSpeedValue.textContent = `${state.animationSpeed.toFixed(2)}x`
   controlsEl.modelYawValue.textContent = `${Math.round(state.modelYawDeg)}°`
   controlsEl.targetLengthValue.textContent = state.targetLength.toFixed(1)
+  controlsEl.sampleDiameterValue.textContent = state.sampleDiameter.toFixed(2)
 }
 
 function bindControls() {
@@ -385,6 +590,18 @@ function bindControls() {
   controlsEl.toggleGrid.addEventListener('change', () => {
     state.showGrid = controlsEl.toggleGrid.checked
     applyVisibility()
+  })
+  controlsEl.toggleBottomSamples.addEventListener('change', () => {
+    state.showBottomSamples = controlsEl.toggleBottomSamples.checked
+    syncHitboxes(true)
+    applyVisibility()
+  })
+  controlsEl.toggleAlignGround.addEventListener('change', () => {
+    state.alignLowPointToGround = controlsEl.toggleAlignGround.checked
+    if (!state.alignLowPointToGround) {
+      state.lastGroundCorrection = 0
+    }
+    syncHitboxes(true)
   })
   controlsEl.toggleAxes.addEventListener('change', () => {
     state.showAxes = controlsEl.toggleAxes.checked
@@ -420,12 +637,20 @@ function bindControls() {
     updateControlsText()
   })
 
+  controlsEl.sampleDiameter.addEventListener('input', () => {
+    state.sampleDiameter = Number(controlsEl.sampleDiameter.value)
+    applyBottomSampleDiameter()
+    updateControlsText()
+    updateMetricsDisplay()
+  })
+
   controlsEl.syncStride.addEventListener('change', () => {
     state.syncStride = Number(controlsEl.syncStride.value)
     syncHitboxes(true)
   })
 
   updateControlsText()
+  applyBottomSampleDiameter()
 }
 
 function applyMeshRenderFlags(root) {
@@ -446,9 +671,15 @@ function resizeRenderer() {
   renderer.setSize(w, h)
 }
 
+let animateCallCount = 0
 function animate() {
   requestAnimationFrame(animate)
   const delta = Math.min(0.033, clock.getDelta())
+
+  animateCallCount++
+  if (animateCallCount % 60 === 0) {
+    console.log('>>> animate() called', animateCallCount, 'times, core exists:', !!core)
+  }
 
   if (core) {
     enemyRoot.rotation.y = THREE.MathUtils.degToRad(state.modelYawDeg)
@@ -464,6 +695,7 @@ function animate() {
     core.rotation.x = Math.sin(animTime * (state.headBobSpeed * 0.42) + state.phase) * 0.05
     core.rotation.y = modelBaseYaw + Math.sin(animTime * (state.slitherSpeed * 0.36) + state.phase) * 0.06
 
+    alignVisualLowPointToGround()
     syncHitboxes(false)
   }
 
@@ -471,15 +703,22 @@ function animate() {
   renderer.render(scene, camera)
 }
 
+console.log('>>> Script starting, setting up scene...')
+console.log('>>> bottomSampleSpheres created:', bottomSampleSpheres.length, 'spheres')
+
 bindControls()
 resizeRenderer()
 window.addEventListener('resize', resizeRenderer)
 resetCamera()
 
+console.log('>>> Starting model load from:', MODEL_URL)
+
 loader.load(
   MODEL_URL,
   (gltf) => {
+    console.log('>>> MODEL LOADED!')
     core = skeletonClone(gltf.scene)
+    console.log('>>> core created:', !!core)
     applyMeshRenderFlags(core)
     enemyRoot.add(core)
 
@@ -501,6 +740,10 @@ loader.load(
     applyModelCalibration()
     applyVisibility()
     loaded = true
+    console.log('>>> Model setup complete, loaded:', loaded)
+    console.log('>>> state.showBottomSamples:', state.showBottomSamples)
+    console.log('>>> bottomSampleGroup.visible:', bottomSampleGroup.visible)
+    console.log('>>> bottomSampleSpheres.length:', bottomSampleSpheres.length)
     statusEl.textContent = 'Loaded. Use panel controls to inspect hitboxes.'
     statusEl.classList.remove('error')
   },
@@ -512,4 +755,6 @@ loader.load(
   }
 )
 
+console.log('>>> animate() starting...')
 animate()
+console.log('>>> Script initialization complete')

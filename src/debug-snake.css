@@ -170,6 +170,16 @@ button:hover {
   color: var(--muted);
 }
 
+#sample-count-banner {
+  margin-top: 10px;
+  border: 1px solid #3f4f69;
+  border-radius: 8px;
+  background: #0f1828;
+  color: #dff4ff;
+  font-size: 12px;
+  padding: 7px 9px;
+}
+
 #legend .c {
   display: inline-block;
   width: 10px;
