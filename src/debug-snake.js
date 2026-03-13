@@ -172,6 +172,7 @@ const clock = new THREE.Clock()
 const tempWorldBox = new THREE.Box3()
 const tempLocalBox = new THREE.Box3()
 const tempCurrentWorldBox = new THREE.Box3()
+const tempMeshBox = new THREE.Box3()
 const tempInvMatrix = new THREE.Matrix4()
 const tempSize = new THREE.Vector3()
 const tempCenter = new THREE.Vector3()
@@ -219,6 +220,36 @@ function resetCamera() {
 
 function formatVec(vec) {
   return `(${vec.x.toFixed(2)}, ${vec.y.toFixed(2)}, ${vec.z.toFixed(2)})`
+}
+
+function computeAnimatedWorldBounds(root, outBox) {
+  outBox.makeEmpty()
+  let hasMeshBounds = false
+
+  root.traverse((node) => {
+    if (!node.isMesh || !node.geometry) {
+      return
+    }
+
+    if (node.isSkinnedMesh && typeof node.computeBoundingBox === 'function') {
+      node.computeBoundingBox()
+    } else if (!node.geometry.boundingBox) {
+      node.geometry.computeBoundingBox()
+    }
+
+    const sourceBox = node.boundingBox || node.geometry.boundingBox
+    if (!sourceBox) {
+      return
+    }
+
+    tempMeshBox.copy(sourceBox).applyMatrix4(node.matrixWorld)
+    outBox.union(tempMeshBox)
+    hasMeshBounds = true
+  })
+
+  if (!hasMeshBounds) {
+    outBox.setFromObject(root)
+  }
 }
 
 function updateMetricsDisplay() {
@@ -274,7 +305,7 @@ function syncHitboxes(force = false) {
   }
 
   core.updateMatrixWorld(true)
-  tempWorldBox.setFromObject(core)
+  computeAnimatedWorldBounds(core, tempWorldBox)
   if (!Number.isFinite(tempWorldBox.min.x)) {
     return
   }
